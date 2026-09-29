@@ -23,23 +23,18 @@ import requests
 from urllib.parse import urlparse, unquote, quote
 import uuid
 import re
+from services.s3_toolkit import get_s3_client as s3_toolkit_client, guess_content_type, build_public_url
 
 logger = logging.getLogger(__name__)
 
 def get_s3_client():
     """Create and return an S3 client using environment variables."""
-    endpoint_url = os.getenv('S3_ENDPOINT_URL')
-    access_key = os.getenv('S3_ACCESS_KEY')
-    secret_key = os.getenv('S3_SECRET_KEY')
-    region = os.environ.get('S3_REGION', '')
-    
-    session = boto3.Session(
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region
+    return s3_toolkit_client(
+        os.getenv('S3_ENDPOINT_URL'),
+        os.getenv('S3_ACCESS_KEY'),
+        os.getenv('S3_SECRET_KEY'),
+        os.environ.get('S3_REGION', '')
     )
-    
-    return session.client('s3', endpoint_url=endpoint_url)
 
 def get_filename_from_url(url):
     """Extract filename from URL."""
@@ -86,7 +81,8 @@ def stream_upload_to_s3(file_url, custom_filename=None, make_public=False, downl
         multipart_upload = s3_client.create_multipart_upload(
             Bucket=bucket_name,
             Key=filename,
-            ACL=acl
+            ACL=acl,
+            ContentType=guess_content_type(filename)
         )
         
         upload_id = multipart_upload['UploadId']
@@ -151,9 +147,7 @@ def stream_upload_to_s3(file_url, custom_filename=None, make_public=False, downl
         
         # Generate the URL to the uploaded file
         if make_public:
-            # URL encode the filename for the URL only
-            encoded_filename = quote(filename)
-            file_url = f"{endpoint_url}/{bucket_name}/{encoded_filename}"
+            file_url = build_public_url(endpoint_url, bucket_name, filename)
         else:
             # Generate a pre-signed URL for private files
             file_url = s3_client.generate_presigned_url(

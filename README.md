@@ -162,6 +162,15 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **Purpose**: The region for the S3-compatible storage service.
 - **Requirement**: Mandatory if using S3-compatible storage, "None" is acceptible for some s3 providers.
 
+#### `S3_PUBLIC_URL`
+- **Purpose**: Public prefix used in returned file links instead of `S3_ENDPOINT_URL/S3_BUCKET_NAME`. Useful when uploads go to an internal endpoint (e.g. `http://minio:9000` on the same Docker network) or when the bucket is served from a custom domain (e.g. Cloudflare R2).
+- **Example**: `https://files.example.com/nca-toolkit` (MinIO, bucket in the path) or `https://files.example.com` (R2 custom domain).
+- **Requirement**: Optional.
+
+#### `S3_ADDRESSING_STYLE`
+- **Purpose**: `path` or `virtual` bucket addressing. Defaults to `path` for self-hosted endpoints (MinIO) and `auto` for AWS / DigitalOcean.
+- **Requirement**: Optional.
+
 ---
 
 ### Google Cloud Storage (GCP) Environment Variables

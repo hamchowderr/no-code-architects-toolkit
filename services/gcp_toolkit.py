@@ -17,6 +17,7 @@
 
 
 import os
+import mimetypes
 import json
 import logging
 from google.oauth2 import service_account
@@ -65,7 +66,8 @@ def upload_to_gcs(file_path, bucket_name=GCP_BUCKET_NAME):
         logger.info(f"Uploading file to Google Cloud Storage: {file_path}")
         bucket = gcs_client.bucket(bucket_name)
         blob = bucket.blob(os.path.basename(file_path))
-        blob.upload_from_filename(file_path)
+        content_type, _ = mimetypes.guess_type(file_path)
+        blob.upload_from_filename(file_path, content_type=content_type or 'application/octet-stream')
         logger.info(f"File uploaded successfully to GCS: {blob.public_url}")
         return blob.public_url
     except Exception as e:
