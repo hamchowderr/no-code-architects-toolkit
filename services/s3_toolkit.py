@@ -17,33 +17,72 @@
 
 
 import os
+import mimetypes
 import boto3
 import logging
+from botocore.config import Config
 from urllib.parse import urlparse, quote
 
 logger = logging.getLogger(__name__)
 
-def upload_to_s3(file_path, s3_url, access_key, secret_key, bucket_name, region):
-    # Parse the S3 URL into bucket, region, and endpoint
-    #bucket_name, region, endpoint_url = parse_s3_url(s3_url)
-    
+HOSTED_PROVIDERS = ('amazonaws.com', 'digitaloceanspaces.com')
+
+def _clean_region(region):
+    # "None"/blank is allowed in the env docs for some providers; boto3 wants a real value or None
+    if not region or str(region).strip().lower() == 'none':
+        return 'us-east-1'
+    return region
+
+def get_s3_client(endpoint_url, access_key, secret_key, region):
+    """S3 client that works with AWS, DO Spaces and self-hosted S3 (MinIO etc.)."""
+    host = (urlparse(endpoint_url).hostname or '') if endpoint_url else ''
+    default_style = 'auto' if host.endswith(HOSTED_PROVIDERS) else 'path'
+    addressing_style = os.getenv('S3_ADDRESSING_STYLE', default_style)
+    config_kwargs = {'s3': {'addressing_style': addressing_style}}
+    try:
+        # boto3 >= 1.36 sends new CRC checksums by default, which many S3-compatible
+        # servers and reverse proxies reject (IncompleteBody / Content-Length errors)
+        config = Config(request_checksum_calculation='when_required',
+                        response_checksum_validation='when_required', **config_kwargs)
+    except TypeError:
+        config = Config(**config_kwargs)
     session = boto3.Session(
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
-        region_name=region
+        region_name=_clean_region(region)
     )
-    
-    client = session.client('s3', endpoint_url=s3_url)
+    return session.client('s3', endpoint_url=endpoint_url, config=config)
+
+def guess_content_type(filename):
+    content_type, _ = mimetypes.guess_type(filename)
+    return content_type or 'application/octet-stream'
+
+def build_public_url(endpoint_url, bucket_name, key):
+    """Public link for an uploaded object.
+
+    S3_PUBLIC_URL (optional) is the full public prefix for objects, e.g.
+    https://files.example.com/nca (MinIO behind a public domain) or
+    https://files.example.com (R2 custom domain). Lets uploads go to an
+    internal endpoint (http://minio:9000) while links stay public.
+    """
+    encoded_key = quote(key)
+    public_base = os.getenv('S3_PUBLIC_URL', '').strip()
+    if public_base:
+        return f"{public_base.rstrip('/')}/{encoded_key}"
+    return f"{endpoint_url.rstrip('/')}/{bucket_name}/{encoded_key}"
+
+def upload_to_s3(file_path, s3_url, access_key, secret_key, bucket_name, region):
+    client = get_s3_client(s3_url, access_key, secret_key, region)
+    key = os.path.basename(file_path)
+    content_type = guess_content_type(key)
 
     try:
-        # Upload the file to the specified S3 bucket
+        logger.info(f"Uploading {key} to bucket {bucket_name} with Content-Type {content_type}")
         with open(file_path, 'rb') as data:
-            client.upload_fileobj(data, bucket_name, os.path.basename(file_path), ExtraArgs={'ACL': 'public-read'})
+            client.upload_fileobj(data, bucket_name, key,
+                                  ExtraArgs={'ACL': 'public-read', 'ContentType': content_type})
 
-        # URL encode the filename for the URL
-        encoded_filename = quote(os.path.basename(file_path))
-        file_url = f"{s3_url}/{bucket_name}/{encoded_filename}"
-        return file_url
+        return build_public_url(s3_url, bucket_name, key)
     except Exception as e:
         logger.error(f"Error uploading file to S3: {e}")
         raise
