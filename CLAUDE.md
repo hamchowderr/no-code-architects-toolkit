@@ -53,6 +53,7 @@ No-Code Architects Toolkit API is a Flask-based media processing API that handle
 - Requires webhook_url in request payload
 - Triggers Cloud Run Job with endpoint and payload as env vars
 - Job executes task independently and sends webhook
+- gunicorn.conf.py `when_ready` hook auto-executes job on startup when CLOUD_RUN_JOB env set
 
 **Synchronous** (No Queue)
 - Used when webhook_url not provided
@@ -87,6 +88,13 @@ def action_handler(job_id, data):
     return result, "/v1/category/action", 200
 ```
 
+**Decorator Order Matters:**
+1. `@authenticate` - First, validates API key
+2. `@validate_payload(schema)` - Second, validates request JSON
+3. `@queue_task_wrapper(bypass_queue=False)` - Last, transforms function signature to accept (job_id, data)
+
+The `queue_task_wrapper` injects `job_id` and `data` parameters, so your handler receives these instead of Flask's default arguments.
+
 See [docs/adding_routes.md](docs/adding_routes.md) for detailed guide.
 
 ### Cloud Storage Abstraction
@@ -98,6 +106,41 @@ See [docs/adding_routes.md](docs/adding_routes.md) for detailed guide.
 - Digital Ocean: Extracts bucket/region from endpoint URL if not provided
 
 Service functions call `upload_file(local_path)` which returns public URL.
+
+### Service Layer Patterns
+
+Services follow a consistent pattern for media processing:
+
+1. **Download** - Use `download_file()` from services/file_management.py
+2. **Process** - Use FFmpeg (via subprocess or ffmpeg-python) for media manipulation
+3. **Upload** - Use `upload_file()` from services/cloud_storage.py
+4. **Cleanup** - Remove temporary files from LOCAL_STORAGE_PATH
+5. **Error Handling** - Clean up files in exception handlers, re-raise errors
+
+Example service structure:
+```python
+def process_media(media_url, job_id=None):
+    # Download
+    input_file = download_file(media_url, os.path.join(LOCAL_STORAGE_PATH, f"{job_id}_input"))
+
+    try:
+        # Process with FFmpeg
+        output_file = os.path.join(LOCAL_STORAGE_PATH, f"{job_id}_output.ext")
+        # ... ffmpeg processing ...
+
+        # Return paths (route handles upload & cleanup)
+        return output_file, input_file
+
+    except Exception as e:
+        # Cleanup on error
+        if os.path.exists(input_file):
+            os.remove(input_file)
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+        raise
+```
+
+Routes handle cloud upload and final cleanup after service returns.
 
 ## Development Commands
 
@@ -136,13 +179,17 @@ docker-compose up
 
 ### Testing
 
-The API uses Postman for testing. Template available at: https://bit.ly/49Gkh61
+**No automated test suite** - This project uses manual testing via Postman.
+
+Postman template: https://bit.ly/49Gkh61
 
 Test endpoint:
 ```bash
 curl -X POST http://localhost:8080/v1/toolkit/test \
   -H "X-API-Key: your_key"
 ```
+
+When adding new features, manually test via Postman or curl before submitting PR.
 
 ## Environment Variables
 
@@ -235,10 +282,79 @@ See [docs/adding_routes.md](docs/adding_routes.md) for full guide.
 
 ## Contributing
 
-- Submit PRs to `build` branch (not main)
-- Use auto-versioning: builds auto-increment via GitHub Actions
+**Important:** Submit PRs to `build` branch, NOT main.
+
+### Before You Start: Feature Evaluation
+
+The project owner is very selective about contributions. Before implementing a feature, evaluate it against this framework:
+
+| Criteria | ✅ Accept if... | ❌ Reject if... |
+|----------|----------------|-----------------|
+| **Mission Fit** | Replaces paid APIs, reduces costs or complexity | Adds noise or solves narrow edge cases |
+| **Input Familiarity** | Uses standard names/types already in use (e.g., `file_url`, `text`) | Introduces new terms for same ideas |
+| **Input Clarity** | Non-tech users would understand what to enter | Needs tech explanation or experimentation |
+| **Output Usefulness** | Returns clean files, text, URLs | Returns raw data or deep nested structures |
+| **Reliability** | API is stable, no retries needed, consistent | Depends on flaky APIs or fragile setup |
+| **Maintenance Cost** | One-and-done, doesn't change often | Vendor changes often, breaks silently |
+| **Value vs. Effort** | High impact, frequently requested | Niche, low ROI |
+
+**What We Accept:**
+- Solves common no-code challenges
+- Reduces cost or replaces paid APIs/tools
+- Works out-of-the-box, no setup required
+- Uses existing input/output naming conventions
+
+**What We Reject:**
+- Features built for one person or edge-case
+- Inconsistent input/output field names
+- Requires polling, retries, or callback logic
+- Needs constant maintenance or breaks frequently
+- Lacks error handling or code comments
+- Includes unused code, requirements, or bloat
+- Adds huge packages that inflate Docker image size
+
+**Standard Field Names** (use these, don't create new ones):
+- `webhook_url` - For async webhook callbacks
+- `video_url`, `audio_url`, `image_url`, `media_url`, `file_url` - For input media
+- `id` - User-provided identifier (returned in response)
+- `start`, `end` - For time-based operations (format: HH:MM:SS or seconds)
+
+### Workflow
+
+1. **Propose your feature first** - Before coding, consider opening a GitHub Discussion or issue to validate your idea fits the project's mission
+2. Fork the repository
+3. Fetch and checkout upstream build branch:
+   ```bash
+   git fetch upstream
+   git checkout -b feature/your-feature-name upstream/build
+   ```
+4. Make changes following the patterns in this document
+5. Test manually via Postman or curl
+6. Push to your fork and create PR targeting `build` branch
+
+### Branch Naming
+
+- Features: `feature/descriptive-name`
+- Bug fixes: `fix/descriptive-name`
+- Docs: `docs/descriptive-name`
+
+### Requirements
+
+**Critical:** This repository only accepts complete, production-ready code. PRs requiring significant cleanup, completion work, or debugging by maintainers will be rejected.
+
+- Complete, debugged code ready for review (no WIP submissions)
 - Update README.md when adding new endpoints
-- Follow GPL-2.0 license (see [LICENSE](LICENSE))
+- Add endpoint documentation to `docs/{category}/{action}.md`
+- Follow existing patterns and conventions exactly
+- Use clear, descriptive names and comments
+- Handle errors properly, clean up temp files
+- Don't change files unrelated to your feature
+- Don't introduce large dependencies that bloat Docker image
+- Test thoroughly via Postman/curl before submitting
+
+### Versioning
+
+Builds auto-increment via GitHub Actions. Don't manually edit version.py.
 
 ## Deployment Guides
 
