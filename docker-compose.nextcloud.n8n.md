@@ -24,8 +24,10 @@ MinIO or other S3 storage is needed.
    ```
 
    Otherwise add `host.docker.internal` to `trusted_domains` in `config/config.php`.
-5. Make sure `overwrite.cli.url` in `config.php` is the address people use to open
-   Nextcloud. Share links are built from it.
+5. Note the address people use to open Nextcloud. Nextcloud builds share links from
+   the address the toolkit used (`host.docker.internal:...`), not from
+   `overwrite.cli.url`, so if people use a different address, set it as
+   `NEXTCLOUD_PUBLIC_URL` in step 2 and the toolkit returns links with it.
 
 ## 2. Configure
 
@@ -44,8 +46,15 @@ cp .env.nextcloud.n8n.example .env.nextcloud.n8n
 | `NEXTCLOUD_LINK_TYPE` | `download` (default): direct file link. `share`: the Nextcloud share page |
 | `GENERIC_TIMEZONE` | n8n's time zone, e.g. `America/Los_Angeles` |
 
-On Linux, give n8n's folder to the user n8n runs as before the first start:
-`mkdir -p "$DATA_DIR/n8n" && sudo chown -R 1000:1000 "$DATA_DIR/n8n"`.
+On Linux, create the stack's folders and give them to uid 1000 (the user both the
+toolkit and n8n run as) before the first start. Otherwise Docker creates them owned
+by root, n8n stops with `EACCES: permission denied` and every toolkit call returns
+500 Internal Server Error:
+
+```bash
+mkdir -p "$DATA_DIR"/{nca-storage,nca-logs,nca-tmp,n8n,n8n-files}
+sudo chown -R 1000:1000 "$DATA_DIR"
+```
 
 ## 3. Start
 
