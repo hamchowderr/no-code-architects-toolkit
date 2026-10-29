@@ -6,6 +6,7 @@ __pycache__/
 
 # Ignore environment and config files
 .env
+.env.nextcloud.n8n
 .env_variables.json
 .env_shell.json
 
@@ -23,3 +24,6 @@ docs/
 # Ignore repository/configuration files not needed in image
 .github/
 .gitignore
+
+# Stack data from docker-compose.nextcloud.n8n.yml (default DATA_DIR)
+data/

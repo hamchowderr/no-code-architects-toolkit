@@ -1,0 +1,52 @@
+# NCA Toolkit + n8n, storing results in an existing Nextcloud.
+#
+# Start:  docker compose --env-file .env.nextcloud.n8n -f docker-compose.nextcloud.n8n.yml up -d --build
+# Guide:  docker-compose.nextcloud.n8n.md
+#
+# Everything the stack keeps (toolkit scratch files, logs, n8n workflows) lives
+# under DATA_DIR, so it can sit on an external drive instead of Docker's own disk.
+
+services:
+  ncat:
+    build: .
+    env_file:
+      - .env.nextcloud.n8n
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${DATA_DIR:-./data}/nca-storage:/app/storage
+      - ${DATA_DIR:-./data}/nca-logs:/app/logs
+      - ${DATA_DIR:-./data}/nca-tmp:/tmp
+    extra_hosts:
+      # Lets the toolkit reach a Nextcloud running on the same machine
+      # (built in on Docker Desktop; this line adds it on Linux)
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - nca-network
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - NODE_ENV=production
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-UTC}
+      - TZ=${GENERIC_TIMEZONE:-UTC}
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-false}
+    volumes:
+      - ${DATA_DIR:-./data}/n8n:/home/node/.n8n
+      - ${DATA_DIR:-./data}/n8n-files:/files
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - nca-network
+
+networks:
+  nca-network:
+    driver: bridge

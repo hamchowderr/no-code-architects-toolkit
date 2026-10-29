@@ -22,6 +22,7 @@ import json
 import logging
 import requests
 from config import LOCAL_STORAGE_PATH
+from services import nextcloud
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -45,9 +46,12 @@ def get_media_metadata(media_url, job_id=None):
         # Initialize metadata dictionary
         metadata = {}
 
+        # Nextcloud share links point at a web page; get the file's own address
+        media_url, headers = nextcloud.prepare_stream(media_url)
+
         # Get file size from HTTP HEAD request (without downloading)
         try:
-            head_response = requests.head(media_url, allow_redirects=True, timeout=10)
+            head_response = requests.head(media_url, headers=headers, allow_redirects=True, timeout=10)
             if 'content-length' in head_response.headers:
                 metadata['filesize'] = int(head_response.headers['content-length'])
                 metadata['filesize_mb'] = round(metadata['filesize'] / (1024 * 1024), 2)  # Convert to MB
@@ -63,8 +67,10 @@ def get_media_metadata(media_url, job_id=None):
             '-show_streams',
             '-analyzeduration', '100K',
             '-probesize', '100K',
-            media_url
         ]
+        if headers:
+            ffprobe_command += ['-headers', ''.join(f'{k}: {v}\r\n' for k, v in headers.items())]
+        ffprobe_command.append(media_url)
 
         logger.info(f"Running ffprobe command on URL")
         result = subprocess.run(ffprobe_command, capture_output=True, text=True)

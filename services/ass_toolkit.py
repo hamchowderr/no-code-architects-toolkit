@@ -25,6 +25,7 @@ from datetime import timedelta
 import srt
 import re
 from services.file_management import download_file
+from services import nextcloud
 from services.cloud_storage import upload_file  # Ensure this import is present
 import requests  # Ensure requests is imported for webhook handling
 from urllib.parse import urlparse
@@ -167,7 +168,10 @@ def download_captions(captions_url):
     """Download captions from the given URL."""
     try:
         logger.info(f"Downloading captions from URL: {captions_url}")
-        response = requests.get(captions_url)
+        fetch_url, fetch_kwargs = nextcloud.prepare_request(captions_url)
+        response = requests.get(fetch_url, **fetch_kwargs)
+        if nextcloud.is_nextcloud_url(captions_url) and (response.status_code >= 400 or 'text/html' in response.headers.get('content-type', '')):
+            nextcloud.explain_failure(response, captions_url)
         response.raise_for_status()
         logger.info("Captions downloaded successfully.")
         return response.text

@@ -19,6 +19,7 @@
 import os
 import ffmpeg
 from config import LOCAL_STORAGE_PATH
+from services import nextcloud
 
 def extract_thumbnail(video_url, job_id, second=0):
     """
@@ -37,11 +38,15 @@ def extract_thumbnail(video_url, job_id, second=0):
     thumbnail_path = os.path.join(LOCAL_STORAGE_PATH, f"{job_id}_thumbnail.jpg")
 
     try:
+        # Nextcloud share links point at a web page; get the file's own address
+        video_url, headers = nextcloud.prepare_stream(video_url)
+        input_options = {'headers': ''.join(f'{k}: {v}\r\n' for k, v in headers.items())} if headers else {}
+
         # Extract thumbnail directly from URL using ffmpeg streaming
         # analyzeduration and probesize are set low to reduce initial buffering
         (
             ffmpeg
-            .input(video_url, ss=second, analyzeduration='100K', probesize='100K')
+            .input(video_url, ss=second, analyzeduration='100K', probesize='100K', **input_options)
             .output(thumbnail_path, vframes=1, update=1)
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True)

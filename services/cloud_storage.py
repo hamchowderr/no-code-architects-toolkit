@@ -21,6 +21,7 @@ import logging
 from abc import ABC, abstractmethod
 from services.gcp_toolkit import upload_to_gcs
 from services.s3_toolkit import upload_to_s3
+from services.nextcloud import upload_to_nextcloud
 from config import validate_env_vars
 from urllib.parse import urlparse
 
@@ -86,9 +87,22 @@ class S3CompatibleProvider(CloudStorageProvider):
     def upload_file(self, file_path: str) -> str:
         return upload_to_s3(file_path, self.endpoint_url, self.access_key, self.secret_key, self.bucket_name, self.region)
 
+class NextcloudProvider(CloudStorageProvider):
+    def upload_file(self, file_path: str) -> str:
+        return upload_to_nextcloud(file_path)
+
 def get_storage_provider() -> CloudStorageProvider:
-    
-    if os.getenv('S3_ENDPOINT_URL'):
+
+    # STORAGE_PROVIDER picks one explicitly when several are configured.
+    # Without it: S3, then GCP, then Nextcloud (existing setups behave as before).
+    choice = (os.getenv('STORAGE_PROVIDER') or '').strip().lower()
+    if choice == 'nextcloud':
+        validate_env_vars('NEXTCLOUD')
+        return NextcloudProvider()
+    if choice not in ('', 's3', 'gcp'):
+        raise ValueError(f"Unknown STORAGE_PROVIDER '{choice}'. Use s3, gcp or nextcloud.")
+
+    if os.getenv('S3_ENDPOINT_URL') and choice in ('', 's3'):
 
         if ('digitalocean' in os.getenv('S3_ENDPOINT_URL').lower()):
 
@@ -98,10 +112,15 @@ def get_storage_provider() -> CloudStorageProvider:
 
         return S3CompatibleProvider()
     
-    if os.getenv('GCP_BUCKET_NAME'):
+    if os.getenv('GCP_BUCKET_NAME') and choice in ('', 'gcp'):
 
         validate_env_vars('GCP')
         return GCPStorageProvider()
+
+    if os.getenv('NEXTCLOUD_URL') and not choice:
+
+        validate_env_vars('NEXTCLOUD')
+        return NextcloudProvider()
     
     raise ValueError(f"No cloud storage settings provided.")
 

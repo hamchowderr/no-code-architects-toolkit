@@ -22,6 +22,7 @@ import logging
 import requests
 import subprocess
 from services.file_management import download_file
+from services import nextcloud
 
 # Set the default local storage directory
 STORAGE_PATH = "/tmp/"
@@ -130,10 +131,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
             logger.info(f"Job {job_id}: Generated ASS style string: {style_string}")
 
-        if caption_srt.startswith("https"):
-            # Download the file if caption_srt is a URL
+        if caption_srt.startswith(("https://", "http://")):
+            # Download the file if caption_srt is a URL (Nextcloud links resolved to direct downloads)
             logger.info(f"Job {job_id}: Downloading caption file from {caption_srt}")
-            response = requests.get(caption_srt)
+            fetch_url, fetch_kwargs = nextcloud.prepare_request(caption_srt)
+            response = requests.get(fetch_url, **fetch_kwargs)
+            if nextcloud.is_nextcloud_url(caption_srt) and (response.status_code >= 400 or 'text/html' in response.headers.get('content-type', '')):
+                nextcloud.explain_failure(response, caption_srt)
             response.raise_for_status()  # Raise an exception for bad status codes
             if caption_type in ['srt','vtt']:
                 with open(srt_path, 'wb') as srt_file:
