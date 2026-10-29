@@ -26,7 +26,7 @@ class FakeNextcloud:
         self.folders = {'/'}     # existing folders
         self.shares = {}         # token -> {'path', 'password', 'folder'}
         self.trusted_hosts = {'localhost'}
-        self.overwrite_url = None   # like overwrite.cli.url; defaults to the request's own address
+        self.overwrite_url = None   # like overwritehost; defaults to the request's own address
         self.sharing_enabled = True
         self.requests = []       # (method, path) log
         self.app = self._build()
@@ -75,6 +75,12 @@ class FakeNextcloud:
                     '"trusted_domains" setting in config/config.php.</p></body></html>',
                     status=400, content_type='text/html; charset=utf-8')
 
+        def page(body, status=200):
+            # Real Nextcloud pages (404s too) carry config that mentions passwords
+            config = '{"lost_password_link":null,"enforcePasswordForPublicLink":false}'
+            return Response(f'<html><head><script data-config=\'{config}\'></script></head>'
+                            f'<body>{body}</body></html>', status, content_type='text/html')
+
         def authed():
             auth = request.authorization
             return auth and auth.username == nc.user and auth.password == nc.app_password
@@ -91,15 +97,15 @@ class FakeNextcloud:
         @app.route('/index.php/s/<token>')
         def share_page(token):
             if token not in nc.shares:
-                return Response('<html>Share not found</html>', 404, content_type='text/html')
-            return Response('<html><body>Share page</body></html>', content_type='text/html')
+                return page('Share not found', 404)
+            return page('Share page')
 
         @app.route('/s/<token>/download')
         @app.route('/index.php/s/<token>/download')
         def share_download(token):
             share = nc.shares.get(token)
             if not share:
-                return Response('<html>File not found</html>', 404, content_type='text/html')
+                return page('File not found', 404)
             if share['password']:
                 return redirect(f'/s/{token}/authenticate/showShare')
             if share['folder']:
@@ -109,7 +115,7 @@ class FakeNextcloud:
                     full = '/'.join(p for p in [share['path'].rstrip('/'), sub, wanted] if p)
                     full = '/' + full.lstrip('/')
                     if full not in nc.files:
-                        return Response('<html>File not found</html>', 404, content_type='text/html')
+                        return page('File not found', 404)
                     return file_response(full)
                 buf = io.BytesIO()
                 with zipfile.ZipFile(buf, 'w') as z:

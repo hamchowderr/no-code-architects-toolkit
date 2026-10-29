@@ -191,7 +191,9 @@ def explain_failure(response, url):
         raise NextcloudError(
             f"Nextcloud refused the address '{host}'. Add it to trusted_domains in Nextcloud's "
             f"config.php (for example: occ config:system:set trusted_domains 10 --value={host}).")
-    if status in (401, 403) or '/authenticate/' in (response.url or '') or 'password' in lowered and content_type == 'text/html':
+    # Password-protected shares redirect to /s/<token>/authenticate/... The page body is no
+    # guide: every Nextcloud page, 404s included, mentions "password" in its built-in config.
+    if status in (401, 403) or '/authenticate/' in (response.url or ''):
         if share_token(url):
             raise NextcloudError(
                 "This Nextcloud share is password-protected, so it can't be downloaded "
