@@ -148,10 +148,32 @@ def test_output_can_feed_the_next_step(stack):
     assert again.endswith('/download') and again != mp3_link
 
 
+def test_metadata_from_share_link_and_private_path(stack):
+    """media/metadata hands the URL to ffprobe itself rather than downloading it first."""
+    nc, client, work = stack
+    token = nc.share('/Auto Edit/Add Captions/clip.mp4')
+    private = f'{nc.url()}/remote.php/dav/files/{nc.user}/Auto%20Edit/Add%20Captions/clip.mp4'
+    for url in (f'{nc.url()}/s/{token}', private):
+        meta = call(client, '/v1/media/metadata', {'media_url': url})
+        assert 2.5 < meta['duration'] < 3.5 and meta['video_codec'] == 'h264'
+
+
+def test_thumbnail_from_share_link(stack):
+    nc, client, work = stack
+    token = nc.share('/Auto Edit/Add Captions/clip.mp4')
+    link = call(client, '/v1/video/thumbnail', {'video_url': f'{nc.url()}/s/{token}', 'second': 1})
+    info = probe(fetch(link, work / 'thumb.jpg'))
+    assert info['streams'][0]['codec_name'] == 'mjpeg'
+
+
 def test_password_share_gives_clear_error(stack):
     nc, client, work = stack
     token = nc.share('/Auto Edit/Add Captions/clip.mp4', password='hunter2')
     res = client.post('/v1/media/convert/mp3', json={'media_url': f'{nc.url()}/s/{token}'},
+                      headers={'x-api-key': os.environ['API_KEY']})
+    assert res.status_code == 500
+    assert 'password-protected' in json.dumps(res.get_json())
+    res = client.post('/v1/video/thumbnail', json={'video_url': f'{nc.url()}/s/{token}'},
                       headers={'x-api-key': os.environ['API_KEY']})
     assert res.status_code == 500
     assert 'password-protected' in json.dumps(res.get_json())

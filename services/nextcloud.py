@@ -45,6 +45,7 @@ Environment:
 
 import os
 import re
+import base64
 import logging
 import mimetypes
 from urllib.parse import urlparse, urlunparse, quote, unquote, parse_qs
@@ -174,6 +175,29 @@ def prepare_request(url):
     return url, {}
 
 
+def prepare_stream(url):
+    """Return (url, extra HTTP headers) for tools that read a media URL themselves (ffprobe, ffmpeg).
+
+    Like prepare_request, but the login goes in an Authorization header, and Nextcloud links
+    are checked first so a password-protected or missing share gets a clear error rather
+    than an ffmpeg one.
+    """
+    fetch_url, kwargs = prepare_request(url)
+    if not is_nextcloud_url(url):
+        return fetch_url, {}
+    response = requests.get(fetch_url, stream=True, timeout=REQUEST_TIMEOUT, **kwargs)
+    try:
+        content_type = response.headers.get('content-type', '').split(';')[0].strip().lower()
+        if response.status_code >= 400 or content_type == 'text/html':
+            explain_failure(response, url)
+    finally:
+        response.close()
+    if 'auth' not in kwargs:
+        return fetch_url, {}
+    token = base64.b64encode(':'.join(kwargs['auth']).encode()).decode()
+    return fetch_url, {'Authorization': f'Basic {token}'}
+
+
 def explain_failure(response, url):
     """Raise a NextcloudError describing a failed or unusable Nextcloud response."""
     status = response.status_code
@@ -181,7 +205,8 @@ def explain_failure(response, url):
     body = ''
     if content_type in ('text/html', 'application/xml', 'text/xml', 'application/json', 'text/plain'):
         try:
-            body = response.text[:4000]
+            # Nextcloud's error pages carry ~14 KB of page setup before the message
+            body = response.text[:65536]
         except Exception:
             body = ''
     lowered = body.lower()
@@ -263,6 +288,11 @@ def _create_share(session, path):
         data={'path': path, 'shareType': 3, 'permissions': 1},
         timeout=REQUEST_TIMEOUT,
     )
+    if response.status_code == 429:
+        raise NextcloudError(
+            f"The file was uploaded to '{path}', but Nextcloud refused to create a share link: by "
+            "default it allows each user 20 new links every 10 minutes. Raise the limit for "
+            "NEXTCLOUD_USER (see docker-compose.nextcloud.n8n.md) or wait and try again.")
     if response.status_code >= 400 and response.status_code != 403:
         explain_failure(response, response.url)
     try:

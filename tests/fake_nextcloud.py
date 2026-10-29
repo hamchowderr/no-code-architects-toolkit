@@ -28,6 +28,8 @@ class FakeNextcloud:
         self.trusted_hosts = {'localhost'}
         self.overwrite_url = None   # like overwritehost; defaults to the request's own address
         self.sharing_enabled = True
+        self.share_limit = None  # like Nextcloud's per-user link limit (20 per 10 minutes)
+        self.shares_created = 0
         self.requests = []       # (method, path) log
         self.app = self._build()
         self._server = None
@@ -69,8 +71,10 @@ class FakeNextcloud:
             nc.requests.append((request.method, request.path))
             host = request.host.split(':')[0]
             if host not in nc.trusted_hosts:
+                # Nextcloud 35 puts ~13.5 KB of page setup ahead of the message
+                setup = '<script nonce="x">/* page setup */</script>\n' * 300
                 return Response(
-                    '<html><body><h2>Access through untrusted domain</h2>'
+                    f'<html><head>{setup}</head><body><h2>Access through untrusted domain</h2>'
                     '<p>Please contact your administrator. If you are an administrator, edit the '
                     '"trusted_domains" setting in config/config.php.</p></body></html>',
                     status=400, content_type='text/html; charset=utf-8')
@@ -179,6 +183,10 @@ class FakeNextcloud:
                 return jsonify({'ocs': {'meta': {'status': 'failure', 'statuscode': 404,
                                                  'message': 'Wrong path, file/folder does not exist'},
                                         'data': []}}), 404
+            if nc.share_limit is not None and nc.shares_created >= nc.share_limit:
+                return jsonify({'ocs': {'meta': {'status': 'failure', 'statuscode': 429,
+                                                 'message': 'Reached maximum delay'}, 'data': []}}), 429
+            nc.shares_created += 1
             token = nc.share(path)
             base = nc.overwrite_url or request.host_url.rstrip('/')
             return jsonify({'ocs': {'meta': {'status': 'ok', 'statuscode': 200, 'message': 'OK'},

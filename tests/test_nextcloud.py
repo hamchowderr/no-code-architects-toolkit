@@ -175,6 +175,12 @@ class TestUpload:
         with pytest.raises(NextcloudError, match='app password'):
             nextcloud.upload_to_nextcloud(self._local(tmp_path))
 
+    def test_share_limit_explains(self, nc, tmp_path):
+        nc.share_limit = 0
+        with pytest.raises(NextcloudError, match='20 new links every 10 minutes'):
+            nextcloud.upload_to_nextcloud(self._local(tmp_path))
+        assert '/NCA Output/result.mp3' in nc.files  # the file itself was saved
+
     def test_missing_settings(self, nc, tmp_path, monkeypatch):
         monkeypatch.delenv('NEXTCLOUD_APP_PASSWORD')
         with pytest.raises(NextcloudError, match='NEXTCLOUD_APP_PASSWORD'):
