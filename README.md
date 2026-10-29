@@ -173,6 +173,36 @@ Each endpoint is supported by robust payload validation and detailed API documen
 
 ---
 
+### Nextcloud Environment Variables
+
+Saves results to a Nextcloud folder and returns a share link. Nextcloud share links and private WebDAV paths on this server can also be used as input anywhere a media URL is accepted. Full setup with n8n: [docker-compose.nextcloud.n8n.md](docker-compose.nextcloud.n8n.md).
+
+#### `NEXTCLOUD_URL`
+- **Purpose**: The address the toolkit uses to reach Nextcloud, e.g. `http://host.docker.internal:8081`. On its own it's enough to read public share links.
+- **Requirement**: Mandatory if using Nextcloud.
+
+#### `NEXTCLOUD_USER` / `NEXTCLOUD_APP_PASSWORD`
+- **Purpose**: The Nextcloud user that owns uploaded files, and an app password for it (Personal settings > Security).
+- **Requirement**: Mandatory for saving to Nextcloud and for private links.
+
+#### `NEXTCLOUD_OUTPUT_FOLDER`
+- **Purpose**: Folder for results, created if missing. Default `NCA Output`.
+- **Requirement**: Optional.
+
+#### `NEXTCLOUD_PUBLIC_URL`
+- **Purpose**: The address people use to open Nextcloud, when it differs from `NEXTCLOUD_URL`. Links pasted with it are fetched through `NEXTCLOUD_URL`, and returned links use it.
+- **Requirement**: Optional.
+
+#### `NEXTCLOUD_LINK_TYPE`
+- **Purpose**: `download` (default) returns a direct file link that can be passed into another call; `share` returns the Nextcloud share page.
+- **Requirement**: Optional.
+
+#### `STORAGE_PROVIDER`
+- **Purpose**: `s3`, `gcp` or `nextcloud`, to choose when more than one is configured. Without it: S3, then GCP, then Nextcloud.
+- **Requirement**: Optional.
+
+---
+
 ### Google Cloud Storage (GCP) Environment Variables
 
 #### `GCP_SA_CREDENTIALS`

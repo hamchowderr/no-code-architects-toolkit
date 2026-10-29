@@ -96,6 +96,11 @@ See [docs/adding_routes.md](docs/adding_routes.md) for detailed guide.
 - GCP: Requires GCP_SA_CREDENTIALS, GCP_BUCKET_NAME
 - S3: Requires S3_ENDPOINT_URL, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME, S3_REGION
 - Digital Ocean: Extracts bucket/region from endpoint URL if not provided
+- Nextcloud: Requires NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_APP_PASSWORD ([services/nextcloud.py](services/nextcloud.py))
+- `STORAGE_PROVIDER` (s3 | gcp | nextcloud) picks one explicitly; otherwise S3, then GCP, then Nextcloud
+
+[services/file_management.py](services/file_management.py) `download_file()` also accepts Nextcloud
+share links and private WebDAV paths on the configured Nextcloud server.
 
 Service functions call `upload_file(local_path)` which returns public URL.
 
@@ -138,6 +143,8 @@ docker-compose up
 
 The API uses Postman for testing. Template available at: https://bit.ly/49Gkh61
 
+Nextcloud support has automated tests (no server needed): `pytest tests/`
+
 Test endpoint:
 ```bash
 curl -X POST http://localhost:8080/v1/toolkit/test \
@@ -161,6 +168,13 @@ S3-Compatible:
 - `S3_SECRET_KEY` - Secret key
 - `S3_BUCKET_NAME` - Bucket name
 - `S3_REGION` - Region (or "None" for some providers)
+
+Nextcloud:
+- `NEXTCLOUD_URL` - How the toolkit reaches Nextcloud (enough on its own to read share links)
+- `NEXTCLOUD_USER` / `NEXTCLOUD_APP_PASSWORD` - User and app password (for output and private links)
+- `NEXTCLOUD_OUTPUT_FOLDER` - Folder for results (default: NCA Output)
+- `NEXTCLOUD_PUBLIC_URL` - Address people use, if different from NEXTCLOUD_URL
+- `NEXTCLOUD_LINK_TYPE` - `download` (default) or `share`
 
 **Optional:**
 - `LOCAL_STORAGE_PATH` - Temp file storage (default: /tmp)
@@ -246,3 +260,4 @@ See [docs/adding_routes.md](docs/adding_routes.md) for full guide.
 - Google Cloud Run: [docs/cloud-installation/gcp.md](docs/cloud-installation/gcp.md)
 - General Docker: [docker-compose.md](docker-compose.md)
 - Local with MinIO + n8n: [docker-compose.local.minio.n8n.md](docker-compose.local.minio.n8n.md)
+- n8n + existing Nextcloud: [docker-compose.nextcloud.n8n.md](docker-compose.nextcloud.n8n.md)

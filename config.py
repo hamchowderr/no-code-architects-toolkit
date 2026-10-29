@@ -37,7 +37,8 @@ def validate_env_vars(provider):
     required_vars = {
         'GCP': ['GCP_BUCKET_NAME', 'GCP_SA_CREDENTIALS'],
         'S3': ['S3_ENDPOINT_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY', 'S3_BUCKET_NAME', 'S3_REGION'],
-        'S3_DO': ['S3_ENDPOINT_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY']
+        'S3_DO': ['S3_ENDPOINT_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY'],
+        'NEXTCLOUD': ['NEXTCLOUD_URL', 'NEXTCLOUD_USER', 'NEXTCLOUD_APP_PASSWORD']
     }
     
     missing_vars = [var for var in required_vars[provider] if not os.getenv(var)]

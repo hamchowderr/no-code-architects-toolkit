@@ -21,6 +21,7 @@ import uuid
 import requests
 from urllib.parse import urlparse, parse_qs
 import mimetypes
+from services import nextcloud
 
 def get_extension_from_url(url):
     """Extract file extension from URL or content type.
@@ -55,12 +56,49 @@ def get_extension_from_url(url):
     # If we can't determine the extension, raise an error
     raise ValueError(f"Could not determine file extension from URL: {url}")
 
+def _download_nextcloud(url, storage_path, file_id):
+    """Download a Nextcloud share link or private WebDAV path.
+
+    Share links have no file extension in the URL, so the extension comes from
+    the filename Nextcloud sends with the file.
+    """
+    fetch_url, kwargs = nextcloud.prepare_request(url)
+    response = requests.get(fetch_url, stream=True, timeout=nextcloud.REQUEST_TIMEOUT, **kwargs)
+    local_filename = None
+    try:
+        content_type = response.headers.get('content-type', '').split(';')[0].strip().lower()
+        if response.status_code >= 400 or content_type == 'text/html':
+            nextcloud.explain_failure(response, url)
+
+        name = nextcloud.filename_from_response(response) or urlparse(fetch_url).path
+        extension = os.path.splitext(name)[1].lower() or mimetypes.guess_extension(content_type) or ''
+        if not extension:
+            raise ValueError(f"Could not determine file extension from Nextcloud link: {url}")
+        local_filename = os.path.join(storage_path, f"{file_id}{extension}")
+
+        with open(local_filename, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        return local_filename
+    except Exception:
+        if local_filename and os.path.exists(local_filename):
+            os.remove(local_filename)
+        raise
+    finally:
+        response.close()
+
+
 def download_file(url, storage_path="/tmp/"):
     """Download a file from URL to local storage."""
     # Create storage directory if it doesn't exist
     os.makedirs(storage_path, exist_ok=True)
-    
+
     file_id = str(uuid.uuid4())
+
+    if nextcloud.is_nextcloud_url(url):
+        return _download_nextcloud(url, storage_path, file_id)
+
     extension = get_extension_from_url(url)
     local_filename = os.path.join(storage_path, f"{file_id}{extension}")
 
