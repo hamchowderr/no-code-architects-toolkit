@@ -24,7 +24,15 @@ MinIO or other S3 storage is needed.
    ```
 
    Otherwise add `host.docker.internal` to `trusted_domains` in `config/config.php`.
-5. Note the address people use to open Nextcloud. Nextcloud builds share links from
+5. Raise Nextcloud's limit on new share links. By default each user may create 20
+   links per 10 minutes, and the toolkit creates one per result, so a busy workflow
+   hits it quickly. This raises it for that one action only:
+
+   ```bash
+   docker exec -u www-data <nextcloud-container> php occ config:system:set ratelimit_overwrite files_sharing.shareapi.createshare user limit --value=1000 --type=integer
+   docker exec -u www-data <nextcloud-container> php occ config:system:set ratelimit_overwrite files_sharing.shareapi.createshare user period --value=600 --type=integer
+   ```
+6. Note the address people use to open Nextcloud. Nextcloud builds share links from
    the address the toolkit used (`host.docker.internal:...`), not from
    `overwrite.cli.url`, so if people use a different address, set it as
    `NEXTCLOUD_PUBLIC_URL` in step 2 and the toolkit returns links with it.
@@ -112,6 +120,7 @@ for private links), so you can read from Nextcloud and save to S3.
 | share is password-protected | Remove the share password, or use a private link |
 | rejected the login | Use an app password, not the account password |
 | wouldn't create a share link | Allow link sharing (step 1.3) |
+| refused to create a share link ... 20 new links | Raise the link limit (step 1.5); the file is already in Nextcloud |
 | couldn't find that file or share | The link is wrong, expired or deleted |
 
 ## Tests
