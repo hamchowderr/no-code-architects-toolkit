@@ -26,7 +26,7 @@ services:
       - nca-network
 
   ncat:
-    image: stephengpope/no-code-architects-toolkit:latest
+    build: .
     env_file:
       - .env.minio
     labels:

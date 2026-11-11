@@ -21,7 +21,7 @@ services:
       - traefik_data:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
   ncat:
-    image: stephengpope/no-code-architects-toolkit:latest
+    build: .
     env_file:
       - .env
     labels:

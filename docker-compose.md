@@ -51,9 +51,16 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin 
 
 ---
 
-## 3. Create Docker Compose File
+## 3. Get the Docker Compose File
 
-Create a `docker-compose.yml` file and paste the following configuration:
+Clone this repository and work from its folder. The compose file builds the image from this repository's code:
+
+```bash
+git clone https://github.com/hamchowderr/no-code-architects-toolkit.git
+cd no-code-architects-toolkit
+```
+
+The repository's `docker-compose.yml` holds the following configuration:
 
 ### With SSL Support
 Enables SSL/TLS for secure, encrypted communications. Ideal for those wanting a hands-off approach to SSL setup.
@@ -82,7 +89,7 @@ services:
       - traefik_data:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
   ncat:
-    image: stephengpope/no-code-architects-toolkit:latest
+    build: .
     env_file:
       - .env
     labels:

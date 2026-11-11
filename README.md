@@ -293,7 +293,7 @@ You can use these instructions to deploy the NCA Toolkit to any linux server (on
 
 You can more easily control performance and cost this way, but requires more technical skill to get up and running (not much though).
 
-- [General Docker Compose Installation Guide](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docker-compose.md)
+- [General Docker Compose Installation Guide](docker-compose.md)
 
 ### Local Development with MinIO and n8n
 
