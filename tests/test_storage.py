@@ -60,10 +60,10 @@ def test_every_request_needs_the_api_key(client):
         assert status == 401, path
 
 
-def test_info_names_the_bucket_and_public_address(client, monkeypatch):
+def test_info_names_the_bucket_and_public_address(client, s3_server, monkeypatch):
     status, body = call(client, "info")
     assert status == 200
-    assert body["response"] == {"provider": "s3", "bucket": BUCKET, "public_url": None}
+    assert body["response"] == {"provider": "s3", "bucket": BUCKET, "endpoint": s3_server, "public_url": None}
     monkeypatch.setenv("S3_PUBLIC_URL", "https://files.example.com/")
     assert call(client, "info")[1]["response"]["public_url"] == "https://files.example.com"
 

@@ -14,7 +14,7 @@ On failure `code` is the HTTP status, `response` is `null` and `message` says wh
 
 | Request | Body | Answer |
 |---|---|---|
-| `/v1/storage/info` | `{}` | `{provider: "s3", bucket, public_url}`. Fails with 502 if the bucket does not answer, so it doubles as a connection check. |
+| `/v1/storage/info` | `{}` | `{provider: "s3", bucket, endpoint, public_url}` (the two addresses the toolkit's output links start with). Fails with 502 if the bucket does not answer, so it doubles as a connection check. |
 | `/v1/storage/sign` | `{key, method?: "GET" \| "PUT", expires_in?: seconds (1 to 604800, default 3600), download_name?}` | `{url, method, expires_in}`. A `PUT` link uploads one file (send the bytes as the body). `download_name` makes a `GET` link download under that name. |
 | `/v1/storage/list` | `{prefix?, folders?: bool, next_token?, max_keys?: 1 to 1000}` | `{files: [{key, etag, size, last_modified}], folders: [...], next_token}`. With `folders: true` only the files straight inside `prefix` and the folders one level down. `last_modified` is in milliseconds. |
 | `/v1/storage/exists` | `{key}` | `{exists}`. A key ending in `/` asks whether anything is in that folder. |

@@ -91,7 +91,11 @@ def _client_error(error, doing):
 
 
 def info():
-    """Which bucket this toolkit uses, its public address, and whether the bucket answers."""
+    """
+    Which bucket this toolkit uses and whether it answers. `endpoint` and `public_url` are
+    the two addresses the toolkit's own output links start with, so an app can tell which
+    links point into this bucket.
+    """
     conf = settings()
     try:
         _client(conf).list_objects_v2(Bucket=conf['bucket'], MaxKeys=1)
@@ -99,7 +103,8 @@ def info():
         raise _client_error(error, "list files")
     except Exception:
         raise StorageError("The toolkit could not reach its bucket.", 502)
-    return {'provider': 's3', 'bucket': conf['bucket'], 'public_url': conf['public_url']}
+    return {'provider': 's3', 'bucket': conf['bucket'], 'endpoint': conf['endpoint'].rstrip('/'),
+            'public_url': conf['public_url']}
 
 
 def sign(key, method='GET', expires_in=3600, download_name=None):
