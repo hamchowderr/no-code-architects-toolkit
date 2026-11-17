@@ -31,7 +31,8 @@ The API does not change: the same 202 answer, the same webhook body, the same jo
 Settings (environment variables):
   REDIS_URL            e.g. redis://redis:6379/0. Turns the Redis queue on.
   REDIS_QUEUE_NAME     Default "ncat".
-  QUEUE_WORKERS        Worker processes worker.py starts. Default: half the CPU cores (min 1).
+  QUEUE_WORKERS        Worker processes worker.py starts. Default: half the CPUs the
+                       container may use (its cgroup limit, not the host's count), min 1.
                        Set to 0 on the API container when workers run elsewhere.
   QUEUE_JOB_TIMEOUT    Seconds before a job is stopped. Default 14400 (4 hours).
   JOB_STATUS_TTL       Seconds job status is kept in Redis. Default 604800 (7 days).
@@ -78,7 +79,15 @@ def status_ttl():
 
 
 def default_worker_count():
-    return max(1, (os.cpu_count() or 2) // 2)
+    from services.cpu_limits import available_cpus
+
+    return max(1, available_cpus() // 2)
+
+
+def worker_count():
+    """QUEUE_WORKERS, or half the CPUs this container may use."""
+    raw = os.environ.get("QUEUE_WORKERS")
+    return int(raw) if raw not in (None, "") else default_worker_count()
 
 
 def get_connection():

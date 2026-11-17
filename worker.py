@@ -58,8 +58,7 @@ def run_one_worker(index):
 def worker_count():
     from services import job_queue
 
-    raw = os.environ.get("QUEUE_WORKERS")
-    return int(raw) if raw not in (None, "") else job_queue.default_worker_count()
+    return job_queue.worker_count()
 
 
 def main():

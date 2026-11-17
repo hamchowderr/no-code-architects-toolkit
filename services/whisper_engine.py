@@ -27,7 +27,8 @@ Settings (environment variables):
   WHISPER_MODEL         Model size or path. Default "base" (what the toolkit always used).
   WHISPER_DEVICE        "auto" (default: GPU when CUDA is present, else CPU), "cpu" or "cuda".
   WHISPER_COMPUTE_TYPE  Default "int8" on CPU and "float16" on GPU.
-  WHISPER_CPU_THREADS   Threads per transcription. Default 0 (CTranslate2 decides).
+  WHISPER_CPU_THREADS   Threads per transcription. Default: the container's CPUs divided by
+                        QUEUE_WORKERS when the Redis queue is on, else all of them.
   WHISPER_BEAM_SIZE     Default 1 (greedy, the decoding openai-whisper used). 5 is a little
                         more accurate and about twice as slow.
   WHISPER_VAD_FILTER    "true" skips long silences before decoding. Default off.
@@ -92,11 +93,54 @@ def get_model(model_size=None):
                 size,
                 device=device,
                 compute_type=compute_type,
-                cpu_threads=int(os.environ.get("WHISPER_CPU_THREADS") or 0),
-                download_root=os.environ.get("WHISPER_CACHE_DIR") or None,
+                cpu_threads=cpu_threads() if device == "cpu" else 0,
+                download_root=_download_root(),
             )
             _models[key] = model
     return model
+
+
+def _download_root():
+    """
+    WHISPER_CACHE_DIR when this process can write there, else the default Hugging Face
+    cache. An old volume mounted over the cache folder can be owned by root.
+    """
+    path = os.environ.get("WHISPER_CACHE_DIR")
+    if not path:
+        return None
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        pass
+    if os.access(path, os.W_OK) or any(name.startswith("models--") for name in _listdir(path)):
+        return path
+    logger.warning(f"WHISPER_CACHE_DIR {path} is not writable; using the default model cache")
+    return None
+
+
+def _listdir(path):
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
+
+
+def cpu_threads():
+    """
+    WHISPER_CPU_THREADS, or the container's CPUs shared among the jobs that can run at
+    once (QUEUE_WORKERS with the Redis queue), so parallel jobs do not fight for cores.
+    """
+    raw = os.environ.get("WHISPER_CPU_THREADS")
+    if raw not in (None, ""):
+        return int(raw)
+    from services.cpu_limits import available_cpus
+
+    cpus = available_cpus()
+    if os.environ.get("REDIS_URL"):
+        from services import job_queue
+
+        return max(1, cpus // max(1, job_queue.worker_count()))
+    return cpus
 
 
 def _word_dict(word):

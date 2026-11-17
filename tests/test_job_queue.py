@@ -193,8 +193,12 @@ def test_status_index_drops_jobs_older_than_the_window(fake_redis):
     assert job_queue.recent_statuses(600) == {"new": "running"}
 
 
-def test_default_worker_count_is_half_the_cores(monkeypatch):
-    monkeypatch.setattr("os.cpu_count", lambda: 8)
+def test_default_worker_count_is_half_the_usable_cpus(monkeypatch):
+    from services import cpu_limits
+
+    monkeypatch.setattr(cpu_limits, "available_cpus", lambda: 8)
     assert job_queue.default_worker_count() == 4
-    monkeypatch.setattr("os.cpu_count", lambda: 1)
+    monkeypatch.setattr(cpu_limits, "available_cpus", lambda: 1)
     assert job_queue.default_worker_count() == 1
+    monkeypatch.setenv("QUEUE_WORKERS", "3")
+    assert job_queue.worker_count() == 3

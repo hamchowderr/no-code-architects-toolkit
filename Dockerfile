@@ -182,7 +182,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN useradd -m appuser 
 
 # Give appuser ownership of the /app directory (including whisper_cache)
-RUN chown appuser:appuser /app 
+RUN chown -R appuser:appuser /app
 
 # Important: Switch to the appuser before downloading the model
 USER appuser
