@@ -20,7 +20,7 @@ import os
 import ffmpeg
 import logging
 import subprocess
-import whisper
+from services import whisper_engine
 from datetime import timedelta
 import srt
 import re
@@ -64,14 +64,11 @@ def rgb_to_ass_color(rgb_color):
 
 def generate_transcription(video_path, language='auto'):
     try:
-        model = whisper.load_model("base")
-        transcription_options = {
-            'word_timestamps': True,
-            'verbose': True,
-        }
-        if language != 'auto':
-            transcription_options['language'] = language
-        result = model.transcribe(video_path, **transcription_options)
+        result = whisper_engine.transcribe(
+            video_path,
+            language=None if language == 'auto' else language,
+            word_timestamps=True,
+        )
         logger.info(f"Transcription generated successfully for video: {video_path}")
         return result
     except Exception as e:

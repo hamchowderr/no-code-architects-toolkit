@@ -187,6 +187,11 @@ Each endpoint is supported by robust payload validation and detailed API documen
 
 ### Performance Tuning Variables
 
+#### `REDIS_URL`
+- **Purpose**: One shared job queue. Jobs with a `webhook_url` run at the same time on `QUEUE_WORKERS` worker processes (default: half the CPU cores) instead of one at a time per Gunicorn worker. The API and webhooks are unchanged.
+- **Default**: not set (each Gunicorn worker keeps its own queue, as before)
+- **More**: [docs/toolkit/queue_and_transcription.md](docs/toolkit/queue_and_transcription.md), which also covers the faster-whisper settings (`WHISPER_MODEL`, `WHISPER_DEVICE`, ...).
+
 #### `MAX_QUEUE_LENGTH`
 - **Purpose**: Limits the maximum number of concurrent tasks in the queue.
 - **Default**: 0 (unlimited)

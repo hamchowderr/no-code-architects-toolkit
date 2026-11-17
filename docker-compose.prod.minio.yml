@@ -38,8 +38,12 @@ services:
     volumes:
       - storage:/var/www/html/storage/app
       - logs:/var/www/html/storage/logs
+    environment:
+      # Shared job queue: jobs with a webhook_url run in parallel on QUEUE_WORKERS workers.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     restart: unless-stopped
     depends_on:
+      - redis
       - minio
       - minio-init
     networks:
@@ -87,7 +91,18 @@ services:
     networks:
       - nca-network
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - nca-network
+
 volumes:
+  redis_data:
+    driver: local
   traefik_data:
     driver: local
   storage:
