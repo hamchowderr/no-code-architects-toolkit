@@ -24,6 +24,7 @@ from flask import Blueprint, request
 from config import LOCAL_STORAGE_PATH
 from services.authentication import authenticate
 from app_utils import queue_task_wrapper, validate_payload
+from services import job_queue
 
 v1_toolkit_jobs_status_bp = Blueprint('v1_toolkit_jobs_status', __name__)
 logger = logging.getLogger(__name__)
@@ -52,6 +53,13 @@ def get_all_jobs_status(job_id, data):
             since_seconds = data.get("since_seconds")
             
         cutoff_time = time.time() - since_seconds
+
+        # With the Redis queue on, every process records its jobs in Redis.
+        if job_queue.enabled():
+            try:
+                return job_queue.recent_statuses(since_seconds), endpoint, 200
+            except Exception as e:
+                logger.error(f"Could not read jobs from Redis, using local files: {e}")
         
         # Construct the path to the jobs directory
         jobs_dir = os.path.join(LOCAL_STORAGE_PATH, 'jobs')

@@ -176,9 +176,7 @@ COPY requirements.txt .
 # Install Python dependencies, upgrade pip 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install openai-whisper && \
-    pip install playwright && \
-    pip install jsonschema 
+    pip install playwright
 
 # Create the appuser 
 RUN useradd -m appuser 
@@ -189,7 +187,8 @@ RUN chown appuser:appuser /app
 # Important: Switch to the appuser before downloading the model
 USER appuser
 
-RUN python -c "import os; print(os.environ.get('WHISPER_CACHE_DIR')); import whisper; whisper.load_model('base')"
+# Download the faster-whisper model now so the first transcription does not wait for it
+RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ.get('WHISPER_MODEL', 'base'), device='cpu', compute_type='int8', download_root=os.environ['WHISPER_CACHE_DIR'])"
 
 # Install Playwright Chromium browser as appuser
 RUN playwright install chromium
@@ -203,15 +202,5 @@ EXPOSE 8080
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-RUN echo '#!/bin/bash\n\
-gunicorn --bind 0.0.0.0:8080 \
-    --workers ${GUNICORN_WORKERS:-2} \
-    --timeout ${GUNICORN_TIMEOUT:-300} \
-    --worker-class sync \
-    --keep-alive 80 \
-    --config gunicorn.conf.py \
-    app:app' > /app/run_gunicorn.sh && \
-    chmod +x /app/run_gunicorn.sh
-
-# Run the shell script
-CMD ["/app/run_gunicorn.sh"]
+# run.sh starts Gunicorn, plus the Redis queue workers when REDIS_URL is set
+CMD ["bash", "/app/run.sh"]

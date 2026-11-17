@@ -23,6 +23,7 @@ from flask import Blueprint, request
 from config import LOCAL_STORAGE_PATH
 from services.authentication import authenticate
 from app_utils import queue_task_wrapper, validate_payload
+from services import job_queue
 
 v1_toolkit_job_status_bp = Blueprint('v1_toolkit_job_status', __name__)
 logger = logging.getLogger(__name__)
@@ -46,6 +47,15 @@ def get_job_status(job_id, data):
     logger.info(f"Retrieving status for job {get_job_id}")
     endpoint = "/v1/toolkit/job/status"
     try:
+        # With the Redis queue on, any process may have run the job: ask Redis first.
+        if job_queue.enabled():
+            try:
+                job_status = job_queue.load_status(get_job_id)
+                if job_status is not None:
+                    return job_status, endpoint, 200
+            except Exception as e:
+                logger.error(f"Could not read job {get_job_id} from Redis: {e}")
+
         # Construct the path to the job status file
         job_file_path = os.path.join(LOCAL_STORAGE_PATH, 'jobs', f"{get_job_id}.json")
         

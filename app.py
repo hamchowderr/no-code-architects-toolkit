@@ -16,7 +16,7 @@
 
 
 
-from flask import Flask, request
+from flask import Flask, request, g
 from queue import Queue
 from services.webhook import send_webhook
 import threading
@@ -27,6 +27,10 @@ import json
 from version import BUILD_NUMBER  # Import the BUILD_NUMBER
 from app_utils import log_job_status, discover_and_register_blueprints  # Import the discover_and_register_blueprints function
 from services.gcp_toolkit import trigger_cloud_run_job
+from services import job_queue
+import logging
+
+logger = logging.getLogger(__name__)
 
 MAX_QUEUE_LENGTH = int(os.environ.get('MAX_QUEUE_LENGTH', 0))
 
@@ -40,7 +44,7 @@ def create_app():
     # Function to process tasks from the queue
     def process_queue():
         while True:
-            job_id, data, task_func, queue_start_time = task_queue.get()
+            job_id, data, task_func, queue_start_time, endpoint_path = task_queue.get()
             queue_time = time.time() - queue_start_time
             run_start_time = time.time()
             pid = os.getpid()  # Get the PID of the actual processing thread
@@ -54,7 +58,13 @@ def create_app():
                 "response": None
             })
             
-            response = task_func()
+            try:
+                response = task_func()
+            except Exception as e:
+                # Before, an error here stopped this worker's queue for good and no
+                # webhook went out. Now the job fails and the queue keeps going.
+                logger.exception(f"Job {job_id} failed")
+                response = (f"Internal error: {e}", endpoint_path, 500)
             run_time = time.time() - run_start_time
             total_time = time.time() - queue_start_time
 
@@ -92,6 +102,110 @@ def create_app():
     # Start the queue processing in a separate thread
     threading.Thread(target=process_queue, daemon=True).start()
 
+    def run_queued_job_here(f, queued_job, data, args, kwargs):
+        """Runs a job taken off the Redis queue, then logs it and sends its webhook."""
+        job_id = queued_job["job_id"]
+        queued_at = queued_job["queued_at"]
+        shared_queue_id = job_queue.queue_id()
+        pid = os.getpid()
+        run_start_time = time.time()
+        log_job_status(job_id, {
+            "job_status": "running",
+            "job_id": job_id,
+            "queue_id": shared_queue_id,
+            "process_id": pid,
+            "response": None
+        })
+        try:
+            response = f(job_id=job_id, data=data, *args, **kwargs)
+        except Exception as e:
+            logger.exception(f"Job {job_id} failed")
+            response = (f"Internal error: {e}", request.path, 500)
+        now = time.time()
+        try:
+            waiting = job_queue.queue_length()
+        except Exception:
+            waiting = 0
+        response_data = {
+            "endpoint": response[1],
+            "code": response[2],
+            "id": data.get("id"),
+            "job_id": job_id,
+            "response": response[0] if response[2] == 200 else None,
+            "message": "success" if response[2] == 200 else response[0],
+            "pid": pid,
+            "queue_id": shared_queue_id,
+            "run_time": round(now - run_start_time, 3),
+            "queue_time": round(run_start_time - queued_at, 3),
+            "total_time": round(now - queued_at, 3),
+            "queue_length": waiting,
+            "build_number": BUILD_NUMBER
+        }
+        log_job_status(job_id, {
+            "job_status": "done",
+            "job_id": job_id,
+            "queue_id": shared_queue_id,
+            "process_id": pid,
+            "response": response_data
+        })
+        if data.get("webhook_url") and data.get("webhook_url") != "":
+            send_webhook(data.get("webhook_url"), response_data)
+        return response_data, response[2]
+
+    def enqueue_in_redis(job_id, data, pid, start_time):
+        """
+        Puts the job on the shared Redis queue and returns the 202 answer, or None when
+        Redis cannot be reached (the job then goes on this worker's own queue instead).
+        """
+        shared_queue_id = job_queue.queue_id()
+        try:
+            waiting = job_queue.queue_length()
+            if MAX_QUEUE_LENGTH > 0 and waiting >= MAX_QUEUE_LENGTH:
+                error_response = {
+                    "code": 429,
+                    "id": data.get("id"),
+                    "job_id": job_id,
+                    "message": f"MAX_QUEUE_LENGTH ({MAX_QUEUE_LENGTH}) reached",
+                    "pid": pid,
+                    "queue_id": shared_queue_id,
+                    "queue_length": waiting,
+                    "build_number": BUILD_NUMBER
+                }
+                log_job_status(job_id, {
+                    "job_status": "done",
+                    "job_id": job_id,
+                    "queue_id": shared_queue_id,
+                    "process_id": pid,
+                    "response": error_response
+                })
+                return error_response, 429
+
+            # Status first, so a fast worker's "running" is never overwritten by "queued".
+            log_job_status(job_id, {
+                "job_status": "queued",
+                "job_id": job_id,
+                "queue_id": shared_queue_id,
+                "process_id": pid,
+                "response": None
+            })
+            job_queue.enqueue(request.path, data, job_id, start_time)
+            waiting = job_queue.queue_length()
+        except Exception as e:
+            logger.error(f"Redis queue unavailable, using this worker's own queue: {e}")
+            return None
+
+        return {
+            "code": 202,
+            "id": data.get("id"),
+            "job_id": job_id,
+            "message": "processing",
+            "pid": pid,
+            "queue_id": shared_queue_id,
+            "max_queue_length": MAX_QUEUE_LENGTH if MAX_QUEUE_LENGTH > 0 else "unlimited",
+            "queue_length": waiting,
+            "build_number": BUILD_NUMBER
+        }, 202
+
     # Decorator to add tasks to the queue or bypass it
     def queue_task(bypass_queue=False):
         def decorator(f):
@@ -103,6 +217,12 @@ def create_app():
 
                 pid = os.getpid()  # Get PID for non-queued tasks
                 start_time = time.time()
+
+                # Running inside a Redis queue worker (worker.py): run the job here.
+                queued_job = g.get("ncat_queued_job")
+                if queued_job is not None:
+                    queued_job["handled"] = True
+                    return run_queued_job_here(f, queued_job, data, args, kwargs)
 
                 # If running inside a GCP Cloud Run Job instance, execute synchronously
                 if os.environ.get("CLOUD_RUN_JOB"):
@@ -306,6 +426,11 @@ def create_app():
                         
                         return error_response, 429
                     
+                    if job_queue.enabled():
+                        queued = enqueue_in_redis(job_id, data, pid, start_time)
+                        if queued is not None:
+                            return queued
+
                     # Log job status as queued
                     log_job_status(job_id, {
                         "job_status": "queued",
@@ -315,7 +440,7 @@ def create_app():
                         "response": None
                     })
                     
-                    task_queue.put((job_id, data, lambda: f(job_id=job_id, data=data, *args, **kwargs), start_time))
+                    task_queue.put((job_id, data, lambda: f(job_id=job_id, data=data, *args, **kwargs), start_time, request.path))
                     
                     return {
                         "code": 202,

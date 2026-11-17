@@ -17,10 +17,9 @@
 
 
 import os
-import whisper
+from services import whisper_engine
 import srt
 from datetime import timedelta
-from whisper.utils import WriteSRT, WriteVTT
 from services.file_management import download_file
 import logging
 import uuid
@@ -39,19 +38,17 @@ def process_transcription(media_url, output_type, max_chars=56, language=None,):
     logger.info(f"Downloaded media to local file: {input_filename}")
 
     try:
-        model = whisper.load_model("base")
-        logger.info("Loaded Whisper model")
 
-        # result = model.transcribe(input_filename)
+        # result = whisper_engine.transcribe(input_filename)
         # logger.info("Transcription completed")
 
         if output_type == 'transcript':
-            result = model.transcribe(input_filename, language=language)
+            result = whisper_engine.transcribe(input_filename, language=language)
             output = result['text']
             logger.info("Generated transcript output")
         elif output_type in ['srt', 'vtt']:
 
-            result = model.transcribe(input_filename)
+            result = whisper_engine.transcribe(input_filename)
             srt_subtitles = []
             for i, segment in enumerate(result['segments'], start=1):
                 start = timedelta(seconds=segment['start'])
@@ -70,11 +67,10 @@ def process_transcription(media_url, output_type, max_chars=56, language=None,):
             logger.info(f"Generated {output_type.upper()} output: {output}")
 
         elif output_type == 'ass':
-            result = model.transcribe(
+            result = whisper_engine.transcribe(
                 input_filename,
                 word_timestamps=True,
                 task='transcribe',
-                verbose=False
             )
             logger.info("Transcription completed with word-level timestamps")
             # Generate ASS subtitle content

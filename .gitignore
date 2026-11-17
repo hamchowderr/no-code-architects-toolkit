@@ -1,4 +1,6 @@
 .env_variables.json
 .DS_Store
 .env_shell.json
-.env
+.env__pycache__/
+*.pyc
+.pytest_cache/

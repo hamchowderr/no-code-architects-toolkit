@@ -22,6 +22,7 @@ import jsonschema
 import os
 import json
 import time
+import logging
 from config import LOCAL_STORAGE_PATH
 
 def validate_payload(schema):
@@ -66,6 +67,15 @@ def log_job_status(job_id, data):
     # Write data directly to file
     with open(job_file, 'w') as f:
         json.dump(data, f, indent=2)
+
+    # With the Redis queue on, jobs run in other processes (or machines), so the status
+    # is also kept in Redis where every process can read it.
+    from services import job_queue
+    if job_queue.enabled():
+        try:
+            job_queue.save_status(job_id, data)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Could not save status for job {job_id} in Redis: {e}")
 
 def queue_task_wrapper(bypass_queue=False):
     def decorator(f):

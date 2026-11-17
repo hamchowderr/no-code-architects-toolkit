@@ -17,10 +17,10 @@
 
 
 import os
-import whisper
+import json
+from services import whisper_engine
 import srt
 from datetime import timedelta
-from whisper.utils import WriteSRT, WriteVTT
 from services.file_management import download_file
 import logging
 from config import LOCAL_STORAGE_PATH
@@ -36,24 +36,13 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
     logger.info(f"Downloaded media to local file: {input_filename}")
 
     try:
-        # Load a larger model for better translation quality
-        #model_size = "large" if task == "translate" else "base"
-        model_size = "base"
-        model = whisper.load_model(model_size)
-        logger.info(f"Loaded Whisper {model_size} model")
-
-        # Configure transcription/translation options
-        options = {
-            "task": task,
-            "word_timestamps": word_timestamps,
-            "verbose": False
-        }
-
-        # Add language specification if provided
-        if language:
-            options["language"] = language
-
-        result = model.transcribe(input_filename, **options)
+        result = whisper_engine.transcribe(
+            input_filename,
+            task=task,
+            language=language,
+            word_timestamps=word_timestamps,
+        )
+        logger.info(f"Transcribed with faster-whisper ({result['language']})")
         
         # For translation task, the result['text'] will be in English
         text = None
@@ -134,7 +123,7 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
                 with open(text_filename, 'w') as f:
                     f.write(text)
             else:
-                text_file = None
+                text_filename = None
             
             if include_srt is True:
                 srt_filename = os.path.join(LOCAL_STORAGE_PATH, f"{job_id}.srt")
@@ -146,7 +135,7 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
             if include_segments is True:
                 segments_filename = os.path.join(LOCAL_STORAGE_PATH, f"{job_id}.json")
                 with open(segments_filename, 'w') as f:
-                    f.write(str(segments_json))
+                    json.dump(segments_json, f)
             else:
                 segments_filename = None
 
