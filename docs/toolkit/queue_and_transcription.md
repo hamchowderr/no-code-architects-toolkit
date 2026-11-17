@@ -16,7 +16,7 @@ The docker-compose files start a `redis` service and set `REDIS_URL` for you.
 | Variable | Default | What it does |
 |---|---|---|
 | `REDIS_URL` | not set | e.g. `redis://redis:6379/0`. Turns the shared queue on. |
-| `QUEUE_WORKERS` | half the CPU cores | Worker processes started next to the API. `0` starts none (run `python worker.py` elsewhere). |
+| `QUEUE_WORKERS` | half the CPUs the container may use | Worker processes started next to the API. `0` starts none (run `python worker.py` elsewhere). |
 | `REDIS_QUEUE_NAME` | `ncat` | Queue name, if several toolkits share one Redis. |
 | `QUEUE_JOB_TIMEOUT` | `14400` | Seconds before a job is stopped. |
 | `JOB_STATUS_TTL` | `604800` | Seconds job status is kept in Redis. |
@@ -26,6 +26,9 @@ More capacity: run more workers on other machines with the same image, the same
 environment (storage keys, `API_KEY`, `REDIS_URL`) and the command `python worker.py`.
 
 If Redis cannot be reached, jobs fall back to the in-process queue rather than failing.
+
+Both defaults read the container's CPU limit (for example `cpus: '2'` in Docker or
+Coolify), not the host's core count, so a capped container is not overloaded.
 
 ## faster-whisper
 
@@ -39,7 +42,7 @@ the model once and keeps it for later jobs.
 | `WHISPER_MODEL` | `base` | Model size (`tiny`, `base`, `small`, `medium`, `large-v3`, ...). |
 | `WHISPER_DEVICE` | `auto` | Uses an NVIDIA GPU when CUDA is present, otherwise CPU. |
 | `WHISPER_COMPUTE_TYPE` | `int8` on CPU, `float16` on GPU | |
-| `WHISPER_CPU_THREADS` | `0` (automatic) | Set it to cores / `QUEUE_WORKERS` when several jobs run at once. |
+| `WHISPER_CPU_THREADS` | CPUs / `QUEUE_WORKERS` | Threads per transcription. |
 | `WHISPER_BEAM_SIZE` | `1` | Greedy, as before. `5` is a little more accurate and about twice as slow. |
 | `WHISPER_VAD_FILTER` | off | `true` skips long silences before decoding. |
 
