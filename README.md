@@ -88,6 +88,11 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **[`/v1/s3/upload`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/s3/upload.md)**
   - Uploads files to Amazon S3 storage by streaming directly from a URL.
 
+### Storage (this fork)
+
+- **[`/v1/storage/*`](docs/storage/storage.md)**
+  - Signed upload and download links, folder listings, copy and delete for the toolkit's own bucket, so apps in front of the toolkit only need its address and API key.
+
 ### Toolkit
 
 - **[`/v1/toolkit/authenticate`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/toolkit/authenticate.md)**
@@ -165,6 +170,10 @@ Each endpoint is supported by robust payload validation and detailed API documen
 #### `S3_PUBLIC_URL`
 - **Purpose**: Public prefix used in returned file links instead of `S3_ENDPOINT_URL/S3_BUCKET_NAME`. Useful when uploads go to an internal endpoint (e.g. `http://minio:9000` on the same Docker network) or when the bucket is served from a custom domain (e.g. Cloudflare R2).
 - **Example**: `https://files.example.com/nca-toolkit` (MinIO, bucket in the path) or `https://files.example.com` (R2 custom domain).
+- **Requirement**: Optional.
+
+#### `S3_LINK_ENDPOINT_URL`
+- **Purpose**: The bucket address browsers use, when `S3_ENDPOINT_URL` is an internal one (e.g. `http://minio:9000`). Signed links from `/v1/storage/sign` are made for this address. Not needed for R2, S3 or Spaces.
 - **Requirement**: Optional.
 
 #### `S3_ADDRESSING_STYLE`

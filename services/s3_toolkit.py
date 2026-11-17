@@ -38,7 +38,8 @@ def get_s3_client(endpoint_url, access_key, secret_key, region):
     host = (urlparse(endpoint_url).hostname or '') if endpoint_url else ''
     default_style = 'auto' if host.endswith(HOSTED_PROVIDERS) else 'path'
     addressing_style = os.getenv('S3_ADDRESSING_STYLE', default_style)
-    config_kwargs = {'s3': {'addressing_style': addressing_style}}
+    # s3v4 so signed links work everywhere (R2 and MinIO only accept SigV4).
+    config_kwargs = {'s3': {'addressing_style': addressing_style}, 'signature_version': 's3v4'}
     try:
         # boto3 >= 1.36 sends new CRC checksums by default, which many S3-compatible
         # servers and reverse proxies reject (IncompleteBody / Content-Length errors)
