@@ -108,6 +108,16 @@ def test_a_short_interjection_does_not_move_the_camera():
     assert set(who.tolist()) == {0}
 
 
+def test_a_listener_who_only_looks_half_like_talking_does_not_take_the_camera():
+    # while someone off camera talks, a listener's score drifts up to about -1 and blips over
+    # zero for under a second (seen on a NASA news conference); the camera stays put
+    n = 250
+    listener = np.full(n, -1.0)
+    listener[150:170] = 0.5
+    a = analysis(n, [{"x": 200, "talk": talk(n, (0, 100))}, {"x": 1000, "talk": listener}])
+    assert set(rf.choose_shots(a, "speaker", SETTINGS).tolist()) == {0}
+
+
 def test_never_cuts_more_often_than_the_hold_time():
     n = 300
     a = analysis(n, [

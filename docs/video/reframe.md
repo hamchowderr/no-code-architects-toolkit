@@ -22,7 +22,7 @@ With `follow: "largest_face"` the speaker model is skipped and the camera stays 
 | `video_url` | string (required) | | The video to reframe |
 | `aspect` | `"9:16"`, `"1:1"`, `"4:5"`, `"16:9"` | `"9:16"` | Shape of the result |
 | `follow` | `"speaker"`, `"largest_face"`, `"center"` | `"speaker"` | What the frame follows |
-| `switch_after` | number, 0 to 10 | `0.5` | Seconds someone must talk before the camera cuts to them |
+| `switch_after` | number, 0 to 10 | `1.0` | Seconds someone must talk before the camera cuts to them |
 | `min_hold` | number, 0 to 30 | `1.5` | Never cut more often than this many seconds |
 | `smoothing` | number, 0 to 10 | `1.5` | Seconds over which movement within one shot is smoothed |
 | `output_width` | integer, 144 to 4320 | `1080` | Width of the result; height follows from `aspect` |

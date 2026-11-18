@@ -56,7 +56,7 @@ DECODE_MAX_WIDTH = 1280  # frames are decoded no wider than this; face crops com
 MIN_FACE_PX = 40  # faces narrower than this (in decoded pixels) are ignored
 TRACK_GAP = 10  # frames a face may go missing before its track ends
 MIN_TRACK = FPS  # tracks shorter than a second are ignored
-SPEAKING = -1.0  # LR-ASD score (after 1 s smoothing) above which a face counts as talking
+SPEAKING = 0.0  # LR-ASD score (after 1 s smoothing) above which a face counts as talking; below 0 the model leans "silent", and a silent listener can drift to -1 while someone off camera talks
 CUT_THRESHOLD = 0.12  # histogram distance between frames that counts as a camera cut (normal motion is about 0.01)
 CUT_RATIO = 6  # ...and it must also be this many times the usual change over the last second
 SCORE_WINDOWS = (1, 2, 4)  # LR-ASD runs over chunks of these lengths (seconds), averaged
@@ -66,7 +66,7 @@ ASPECTS = {"9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5), "16:9": (16, 9)}
 DEFAULTS = {
     "aspect": "9:16",
     "follow": "speaker",  # speaker | largest_face | center
-    "switch_after": 0.5,  # seconds a new speaker must talk before the camera cuts to them
+    "switch_after": 1.0,  # seconds a new speaker must talk before the camera cuts to them
     "min_hold": 1.5,  # never cut more often than this (seconds)
     "smoothing": 1.5,  # seconds over which movement within one shot is smoothed
     "output_width": 1080,
