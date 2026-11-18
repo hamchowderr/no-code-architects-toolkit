@@ -125,6 +125,18 @@ def test_holds_on_the_last_speaker_when_nobody_on_screen_talks():
     assert set(rf.choose_shots(a, "speaker", SETTINGS).tolist()) == {0}
 
 
+def test_an_off_screen_voice_first_starts_on_whoever_talks_next():
+    # nobody on screen talks for the first 4 s (a question from off camera); the face on the
+    # left scores a little higher while silent, but the one on the right answers
+    n = 250
+    a = analysis(n, [
+        {"x": 200, "talk": np.where(np.arange(n) < 100, -2.0, -5.0)},
+        {"x": 1000, "talk": talk(n, (100, 250))},
+    ])
+    who = rf.choose_shots(a, "speaker", SETTINGS)
+    assert set(who.tolist()) == {1}
+
+
 def test_a_camera_cut_moves_at_once_to_the_new_shot():
     n = 200
     a = analysis(n, [
