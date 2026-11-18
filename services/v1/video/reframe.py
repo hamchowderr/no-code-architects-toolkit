@@ -559,19 +559,20 @@ def reframe_video(src, out, work_dir, options=None):
     info = probe(src)
     crop = crop_box(info["width"], info["height"], aspect)
     out_w, out_h = output_size(aspect, settings["output_width"])
+    # The plain numbers first: apps that show a few facts from an answer show these.
     result = {
-        "follow": follow,
-        "aspect": aspect,
-        "source": {"width": info["width"], "height": info["height"]},
-        "crop": {"width": crop["width"], "height": crop["height"]},
-        "width": out_w,
-        "height": out_h,
-        "duration": round(info["duration"], 3),
         "faces": 0,
-        "speakers": [],
         "switches": 0,
         "camera_cuts": 0,
         "note": None,
+        "duration": round(info["duration"], 3),
+        "follow": follow,
+        "aspect": aspect,
+        "width": out_w,
+        "height": out_h,
+        "source": {"width": info["width"], "height": info["height"]},
+        "crop": {"width": crop["width"], "height": crop["height"]},
+        "speakers": [],
     }
 
     centre_x = (info["width"] - crop["width"]) // 2
