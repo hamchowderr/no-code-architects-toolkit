@@ -36,6 +36,12 @@ Settings (environment variables):
                        Set to 0 on the API container when workers run elsewhere.
   QUEUE_JOB_TIMEOUT    Seconds before a job is stopped. Default 14400 (4 hours).
   JOB_STATUS_TTL       Seconds job status is kept in Redis. Default 604800 (7 days).
+  ABANDONED_CHECK_SECONDS  How often worker.py looks for jobs a dead worker left. Default 60.
+
+A job whose worker dies (the container restarts, the process is killed) would otherwise
+say "running" forever and never send its webhook. worker.py calls fail_abandoned_jobs()
+every minute: a running job whose worker has stopped checking in is marked done with a
+failure and its webhook is sent, so whoever asked for it can try again.
 """
 
 import json
@@ -233,6 +239,74 @@ def run_queued_job(path, payload, job_id, queued_at):
                 send_webhook(payload["webhook_url"], response)
             return response
     return {"job_id": job_id}
+
+
+# --- Jobs left behind by a worker that died ---------------------------------------------
+
+ABANDONED_MESSAGE = (
+    "The toolkit stopped while running this job (it was restarted or its worker died), "
+    "so the job did not finish. Sending it again should work."
+)
+
+
+def _worker_alive(conn, worker_name):
+    from rq import Worker
+
+    if not worker_name:
+        return False
+    # A worker's key expires when it stops sending heartbeats (worker_ttl, 7 minutes).
+    return conn.exists(Worker.redis_worker_namespace_prefix + worker_name) > 0
+
+
+def fail_abandoned_jobs():
+    """
+    Finds running jobs whose worker is gone, marks them done with a failure and sends
+    their webhook. Returns the ids it failed. Jobs a live worker still holds are left alone.
+    """
+    from rq.exceptions import NoSuchJobError
+    from rq.job import Job, JobStatus
+    from app_utils import log_job_status
+    from services.webhook import send_webhook
+
+    conn = get_connection()
+    failed = []
+    ids = conn.zrangebyscore(STATUS_INDEX_KEY, time.time() - status_ttl(), "+inf")
+    for raw_id in ids:
+        job_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        status = load_status(job_id)
+        if not status or status.get("job_status") != "running":
+            continue
+        try:
+            job = Job.fetch(job_id, connection=conn)
+        except NoSuchJobError:
+            # Not a queued job (it ran inside a web request), or long gone from RQ.
+            continue
+        rq_status = job.get_status(refresh=True)
+        if rq_status in (JobStatus.QUEUED, JobStatus.SCHEDULED, JobStatus.DEFERRED):
+            continue
+        if rq_status == JobStatus.STARTED and _worker_alive(conn, job.worker_name):
+            continue
+        if rq_status == JobStatus.FINISHED:
+            # The worker finished between our reads; its own status write wins.
+            continue
+
+        path, payload, _, queued_at = job.args
+        response = _failure_response(payload, job_id, path, ABANDONED_MESSAGE, queued_at)
+        log_job_status(job_id, {
+            "job_status": "done",
+            "job_id": job_id,
+            "queue_id": queue_id(),
+            "process_id": os.getpid(),
+            "response": response,
+        })
+        logger.warning(f"Job {job_id} ({path}) was left behind by worker {job.worker_name}; marked failed")
+        if payload.get("webhook_url"):
+            try:
+                send_webhook(payload["webhook_url"], response)
+            except Exception as e:
+                logger.error(f"Could not send the webhook for abandoned job {job_id}: {e}")
+        failed.append(job_id)
+    return failed
 
 
 def _describe(rv):

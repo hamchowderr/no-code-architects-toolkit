@@ -202,3 +202,66 @@ def test_default_worker_count_is_half_the_usable_cpus(monkeypatch):
     assert job_queue.default_worker_count() == 1
     monkeypatch.setenv("QUEUE_WORKERS", "3")
     assert job_queue.worker_count() == 3
+
+
+# --- Jobs a dead worker left behind -----------------------------------------------------
+
+def _left_running(conn, webhook_url, worker_name, job_id="job-left"):
+    """A queued echo job that a worker took and then stopped reporting on."""
+    from rq.job import Job, JobStatus
+
+    queued_at = time.time() - 120
+    job_queue.enqueue("/v1/test/echo", {"value": "x", "id": "step-7", "webhook_url": webhook_url}, job_id, queued_at)
+    job = Job.fetch(job_id, connection=conn)
+    job.set_status(JobStatus.STARTED)
+    job.worker_name = worker_name
+    job.save()
+    job_queue.save_status(job_id, {"job_status": "running", "job_id": job_id, "queue_id": job_queue.queue_id(), "process_id": 1, "response": None})
+    return job_id
+
+
+def test_a_job_whose_worker_is_gone_is_failed_and_its_webhook_sent(flask_app, fake_redis, webhook_sink):
+    job_id = _left_running(fake_redis, webhook_sink.url, "ncat-oldcontainer-13-3")
+
+    assert job_queue.fail_abandoned_jobs() == [job_id]
+
+    [hook] = webhook_sink.wait_for(1)
+    assert hook["body"]["code"] == 500
+    assert hook["body"]["id"] == "step-7"
+    assert hook["body"]["job_id"] == job_id
+    assert hook["body"]["message"] == job_queue.ABANDONED_MESSAGE
+    status = job_queue.load_status(job_id)
+    assert status["job_status"] == "done"
+    assert status["response"]["code"] == 500
+    # Asked again, it is already settled: no second webhook.
+    assert job_queue.fail_abandoned_jobs() == []
+    assert len(webhook_sink.received) == 1
+
+
+def test_a_job_a_live_worker_holds_is_left_alone(flask_app, fake_redis, webhook_sink):
+    from rq import Worker
+
+    name = "ncat-thiscontainer-10-0"
+    fake_redis.set(Worker.redis_worker_namespace_prefix + name, "alive")
+    job_id = _left_running(fake_redis, webhook_sink.url, name)
+
+    assert job_queue.fail_abandoned_jobs() == []
+    assert job_queue.load_status(job_id)["job_status"] == "running"
+    assert webhook_sink.received == []
+
+
+def test_a_job_still_waiting_in_the_queue_is_left_alone(flask_app, fake_redis, webhook_sink):
+    job_queue.enqueue("/v1/test/echo", {"value": "x", "webhook_url": webhook_sink.url}, "job-waiting", time.time())
+    # Some paths write "running" before a worker picks the job up; RQ still has it queued.
+    job_queue.save_status("job-waiting", {"job_status": "running", "job_id": "job-waiting"})
+
+    assert job_queue.fail_abandoned_jobs() == []
+    run_worker_until_empty()
+    [hook] = webhook_sink.wait_for(1)
+    assert hook["body"]["code"] == 200
+
+
+def test_a_running_job_that_never_went_through_the_queue_is_left_alone(flask_app, fake_redis):
+    job_queue.save_status("job-in-request", {"job_status": "running", "job_id": "job-in-request"})
+    assert job_queue.fail_abandoned_jobs() == []
+    assert job_queue.load_status("job-in-request")["job_status"] == "running"

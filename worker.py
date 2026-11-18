@@ -55,6 +55,23 @@ def run_one_worker(index):
     worker.work(with_scheduler=False)
 
 
+def fail_abandoned_jobs():
+    os.chdir(HERE)
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    from services import job_queue
+
+    try:
+        return job_queue.fail_abandoned_jobs()
+    except Exception as e:
+        logger.error(f"Could not check for abandoned jobs: {e}")
+        return []
+
+
+# How often the pool looks for jobs a dead worker left behind.
+ABANDONED_CHECK_SECONDS = int(os.environ.get("ABANDONED_CHECK_SECONDS") or 60)
+
+
 def worker_count():
     from services import job_queue
 
@@ -93,7 +110,11 @@ def main():
     for i in range(count):
         start(i)
 
+    last_check = 0.0
     while not stopping:
+        if time.time() - last_check >= ABANDONED_CHECK_SECONDS:
+            last_check = time.time()
+            fail_abandoned_jobs()
         for index, p in list(procs.items()):
             if not p.is_alive() and not stopping:
                 logger.warning(f"Worker {index} exited with code {p.exitcode}; starting it again")
