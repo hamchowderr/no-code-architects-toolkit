@@ -127,6 +127,9 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **[`/v1/video/trim`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/trim.md)**
   - Trims a video by keeping only the content between specified start and end times.
 
+- **[`/v1/video/reframe`](docs/video/reframe.md)** (this fork only)
+  - Turns a wide video into a tall (or square) one that follows whoever is talking.
+
 ---
 
 ## Docker Build and Run

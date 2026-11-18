@@ -24,3 +24,6 @@ faster-whisper>=1.1,<2
 av>=11,<16
 redis>=5,<9
 rq>=2.0,<4
+# /v1/video/reframe: YuNet face finding (OpenCV) and the speaker model (ONNX Runtime, also used by faster-whisper)
+opencv-python-headless>=4.8,<5
+onnxruntime>=1.16,<2
