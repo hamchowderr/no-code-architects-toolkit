@@ -439,12 +439,23 @@ def choose_shots(analysis, follow, settings):
     hold = int(round(settings["min_hold"] * FPS))
     who = np.full(n, -1)
     cur, last_switch = -1, -10 ** 9
+    shot_end = np.empty(n, dtype=int)
+    end = n
+    for f in range(n - 1, -1, -1):
+        shot_end[f] = end
+        if f in cut_set:
+            end = f
     for f in range(n):
         here = np.flatnonzero(present[:, f])
         if f in cut_set or cur == -1 or not present[cur, f] and here.size:
             # new shot, nothing chosen yet, or the face we were on has gone: take the best face here now
             if here.size:
-                cand = [i for i in here if talking[i, f]] or list(here)
+                cand = [i for i in here if talking[i, f]]
+                if not cand:
+                    # nobody on screen is talking yet (an off-screen voice, or a pause): start on
+                    # whoever in this shot talks first, not on a face that happens to score highest
+                    nxt = _next_speaker(f, shot_end[f], here, talking, confirm)
+                    cand = [nxt] if nxt is not None else list(here)
                 best = max(cand, key=lambda i: level[i, f])
                 if best != cur:
                     cur, last_switch = best, f
@@ -456,6 +467,15 @@ def choose_shots(analysis, follow, settings):
                     cur, last_switch = best, f
         who[f] = cur
     return who
+
+
+def _next_speaker(start, end, here, talking, confirm):
+    """The first of `here` (faces on screen now) to talk for `confirm` frames between start and end."""
+    for f in range(start, end):
+        for i in here:
+            if talking[i, f:min(f + confirm, end)].all():
+                return i
+    return None
 
 
 def camera_path(analysis, who, info, crop, settings):
