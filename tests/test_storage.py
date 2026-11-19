@@ -55,7 +55,8 @@ def upload(client, key, data):
 
 
 def test_every_request_needs_the_api_key(client):
-    for path in ["info", "sign", "list", "exists", "copy", "delete", "folder"]:
+    for path in ["info", "sign", "list", "exists", "copy", "delete", "folder",
+                 "upload/start", "upload/sign", "upload/complete", "upload/abort"]:
         status, _ = call(client, path, {"key": "a"}, key="wrong")
         assert status == 401, path
 
@@ -164,3 +165,109 @@ def test_folder_makes_an_empty_folder(client):
     assert status == 200 and body["response"] == {"prefix": "empty/"}
     _, body = call(client, "list", {"folders": True})
     assert "empty/" in body["response"]["folders"]
+
+
+MIB = 1024 * 1024
+
+
+def send_in_parts(client, key, chunks):
+    """Starts an upload in parts, PUTs every chunk to its signed link the way a browser does,
+    and gives back the parts with the ETag the bucket answered each one with."""
+    status, body = call(client, "upload/start", {"key": key, "content_type": "video/mp4"})
+    assert status == 200, body
+    upload_id = body["response"]["upload_id"]
+    status, body = call(client, "upload/sign", {
+        "key": key, "upload_id": upload_id, "part_numbers": list(range(1, len(chunks) + 1)),
+    })
+    assert status == 200, body
+    parts = []
+    for link, chunk in zip(body["response"]["parts"], chunks):
+        put = requests.put(link["url"], data=chunk)
+        assert put.status_code == 200, put.text
+        parts.append({"part_number": link["part_number"], "etag": put.headers["ETag"]})
+    return upload_id, parts
+
+
+def test_an_upload_in_parts_becomes_one_file(client, s3_server):
+    chunks = [b"a" * (5 * MIB), b"b" * (5 * MIB), b"c" * 1000]
+    upload_id, parts = send_in_parts(client, "uploads/big.mp4", chunks)
+    # Out of order on purpose: the toolkit sorts them.
+    status, body = call(client, "upload/complete", {
+        "key": "uploads/big.mp4", "upload_id": upload_id, "parts": list(reversed(parts)),
+    })
+    assert status == 200, body
+    assert body["response"]["key"] == "uploads/big.mp4"
+    assert body["response"]["etag"]
+    status, body = call(client, "sign", {"key": "uploads/big.mp4"})
+    got = requests.get(body["response"]["url"])
+    assert got.content == b"".join(chunks)
+    assert got.headers["Content-Type"] == "video/mp4"
+
+
+def test_signing_parts_checks_the_numbers(client):
+    status, body = call(client, "upload/start", {"key": "x.mp4"})
+    upload_id = body["response"]["upload_id"]
+    for numbers in [[], [0], [10001]]:
+        status, _ = call(client, "upload/sign", {"key": "x.mp4", "upload_id": upload_id, "part_numbers": numbers})
+        assert status == 400, numbers
+    status, body = call(client, "upload/sign", {"key": "x.mp4", "upload_id": upload_id, "part_numbers": [1, 2]})
+    assert status == 200
+    assert [part["part_number"] for part in body["response"]["parts"]] == [1, 2]
+
+
+def test_completing_with_a_wrong_etag_says_so(client):
+    upload_id, parts = send_in_parts(client, "bad.mp4", [b"a" * (5 * MIB), b"b"])
+    parts[0]["etag"] = '"0000"'
+    status, body = call(client, "upload/complete", {"key": "bad.mp4", "upload_id": upload_id, "parts": parts})
+    assert status == 400
+    assert "etag" in body["message"]
+
+
+def test_a_part_number_listed_twice_is_refused(client):
+    upload_id, parts = send_in_parts(client, "twice.mp4", [b"a"])
+    status, body = call(client, "upload/complete", {
+        "key": "twice.mp4", "upload_id": upload_id, "parts": parts + parts,
+    })
+    assert status == 400
+    assert "twice" in body["message"]
+
+
+def test_a_cancelled_upload_leaves_no_file(client):
+    upload_id, parts = send_in_parts(client, "gone.mp4", [b"a"])
+    status, body = call(client, "upload/abort", {"key": "gone.mp4", "upload_id": upload_id})
+    assert status == 200
+    assert body["response"]["cancelled"] is True
+    # Cancelling again is fine.
+    assert call(client, "upload/abort", {"key": "gone.mp4", "upload_id": upload_id})[0] == 200
+    assert call(client, "exists", {"key": "gone.mp4"})[1]["response"]["exists"] is False
+
+
+def test_a_big_file_is_copied_in_parts(client, monkeypatch):
+    from services.v1.storage import bucket
+
+    # The real line is 4 GiB; a small one here so the test sends 11 MiB, not 4 GiB.
+    monkeypatch.setattr(bucket, "COPY_IN_PARTS_FROM", 6 * MIB)
+    monkeypatch.setattr(bucket, "COPY_PART_SIZE", 5 * MIB)
+    chunks = [b"a" * (5 * MIB), b"b" * (5 * MIB), b"c" * MIB]
+    upload_id, parts = send_in_parts(client, "big/source.mp4", chunks)
+    call(client, "upload/complete", {"key": "big/source.mp4", "upload_id": upload_id, "parts": parts})
+    status, body = call(client, "copy", {"source": "big/source.mp4", "destination": "big/copy.mp4"})
+    assert status == 200, body
+    assert body["response"]["key"] == "big/copy.mp4"
+    assert body["response"]["etag"].endswith("-3")  # made of three parts
+    status, body = call(client, "sign", {"key": "big/copy.mp4"})
+    assert requests.get(body["response"]["url"]).content == b"".join(chunks)
+
+
+def test_bucket_upload_errors_read_plainly():
+    # moto answers an unknown upload id with a server error, so the bucket's real answers are made here.
+    from botocore.exceptions import ClientError
+    from services.v1.storage.bucket import _upload_error
+
+    def answer(code):
+        return _upload_error(ClientError({"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": 400}}, "x"), "finish")
+
+    assert answer("NoSuchUpload").status == 404
+    assert "never started" in str(answer("NoSuchUpload"))
+    assert answer("InvalidPart").status == 400
+    assert "5 MiB" in str(answer("EntityTooSmall"))
