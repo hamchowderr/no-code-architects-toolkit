@@ -130,6 +130,9 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **[`/v1/video/reframe`](docs/video/reframe.md)** (this fork only)
   - Turns a wide video into a tall (or square) one that follows whoever is talking.
 
+- **[`/v1/video/motion`](docs/video/motion.md)** (this fork only)
+  - Lays motion graphics (lower thirds, titles, stat cards, follow cards and more) and sound effects over a video.
+
 ---
 
 ## Docker Build and Run

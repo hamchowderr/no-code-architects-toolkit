@@ -15,6 +15,11 @@ jobs:
           cache: pip
       - name: System packages (FFmpeg, Redis)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg redis-server
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: HyperFrames (draws /v1/video/motion's pieces)
+        run: npm install -g hyperframes@0.9.70
       - name: Python packages
         run: pip install -r requirements.txt fakeredis pytest "moto[server]"
       - name: Cache Whisper models
@@ -23,4 +28,9 @@ jobs:
           path: ~/.cache/huggingface
           key: whisper-tiny-v1
       - name: Run tests
+        env:
+          HYPERFRAMES_BROWSER_PATH: /usr/bin/google-chrome
+          REQUIRE_HYPERFRAMES: "1"
+          HYPERFRAMES_NO_TELEMETRY: "1"
+          DO_NOT_TRACK: "1"
         run: python -m pytest tests -v
