@@ -36,6 +36,24 @@ def get_s3_client():
         os.environ.get('S3_REGION', '')
     )
 
+# The size of every part but the last. 16 MB parts allow files up to 160 GB (S3 and R2
+# take at most 10,000 parts), well past a long meeting recording.
+PART_SIZE = 16 * 1024 * 1024
+
+
+def _upload_part(s3_client, bucket_name, key, upload_id, parts, body):
+    part_number = len(parts) + 1
+    logger.info(f"Uploading part {part_number} ({len(body)} bytes)")
+    part = s3_client.upload_part(
+        Bucket=bucket_name,
+        Key=key,
+        PartNumber=part_number,
+        UploadId=upload_id,
+        Body=body,
+    )
+    parts.append({'PartNumber': part_number, 'ETag': part['ETag']})
+
+
 def get_filename_from_url(url):
     """Extract filename from URL."""
     path = urlparse(url).path
@@ -86,56 +104,38 @@ def stream_upload_to_s3(file_url, custom_filename=None, make_public=False, downl
         )
         
         upload_id = multipart_upload['UploadId']
-        
-        # Stream the file from URL
-        response = requests.get(file_url, stream=True, headers=download_headers)
-        response.raise_for_status()
-        
-        # Process in chunks using multipart upload
-        chunk_size = 5 * 1024 * 1024  # 5MB chunks (AWS minimum)
         parts = []
-        part_number = 1
-        
-        buffer = bytearray()
-        
-        for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB read chunks
-            buffer.extend(chunk)
-            
-            # When we have enough data for a part, upload it
-            if len(buffer) >= chunk_size:
-                logger.info(f"Uploading part {part_number}")
-                part = s3_client.upload_part(
-                    Bucket=bucket_name,
-                    Key=filename,
-                    PartNumber=part_number,
-                    UploadId=upload_id,
-                    Body=buffer
-                )
-                
-                parts.append({
-                    'PartNumber': part_number,
-                    'ETag': part['ETag']
-                })
-                
-                part_number += 1
-                buffer = bytearray()
-        
-        # Upload any remaining data as the final part
-        if buffer:
-            logger.info(f"Uploading final part {part_number}")
-            part = s3_client.upload_part(
-                Bucket=bucket_name,
-                Key=filename,
-                PartNumber=part_number,
-                UploadId=upload_id,
-                Body=buffer
+        try:
+            # Stream the file from URL. A source that stops sending is given up on.
+            response = requests.get(
+                file_url, stream=True, headers=download_headers, timeout=(30, 300)
             )
-            
-            parts.append({
-                'PartNumber': part_number,
-                'ETag': part['ETag']
-            })
-        
+            response.raise_for_status()
+
+            # Every part but the last is exactly PART_SIZE: Cloudflare R2 refuses to
+            # complete an upload whose parts differ in size, and however the download
+            # arrives in pieces, the parts are cut the same.
+            buffer = bytearray()
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                buffer.extend(chunk)
+                while len(buffer) >= PART_SIZE:
+                    _upload_part(s3_client, bucket_name, filename, upload_id, parts,
+                                 bytes(buffer[:PART_SIZE]))
+                    del buffer[:PART_SIZE]
+
+            # Upload any remaining data as the final part (an empty file still needs one)
+            if buffer or not parts:
+                _upload_part(s3_client, bucket_name, filename, upload_id, parts, bytes(buffer))
+        except Exception:
+            # Leave no half-made upload behind in the bucket.
+            try:
+                s3_client.abort_multipart_upload(
+                    Bucket=bucket_name, Key=filename, UploadId=upload_id
+                )
+            except Exception:
+                pass
+            raise
+
         # Complete the multipart upload
         logger.info("Completing multipart upload")
         s3_client.complete_multipart_upload(
