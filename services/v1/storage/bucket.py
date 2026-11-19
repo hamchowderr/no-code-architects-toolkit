@@ -26,12 +26,20 @@ Signed links go straight to the bucket, so file bytes never pass through the too
 import os
 from datetime import timezone
 
+from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import ClientError
 
 from services.s3_toolkit import get_s3_client
 
 MAX_LINK_SECONDS = 7 * 24 * 60 * 60  # the SigV4 limit
 MAX_KEYS = 1000
+# S3 and R2 take at most 10,000 parts per file, each part up to 5 GiB.
+MAX_PARTS = 10000
+# Parts signed in one request, so a browser can ask for the next batch as it goes.
+MAX_SIGNED_PARTS = 1000
+# A file this size or more is copied in parts: one CopyObject call stops at 5 GiB.
+COPY_IN_PARTS_FROM = 4 * 1024 ** 3
+COPY_PART_SIZE = 512 * 1024 ** 2
 
 
 class StorageError(Exception):
@@ -195,12 +203,30 @@ def exists(key):
 
 
 def copy(source, destination):
-    """Copies a file inside the bucket (the bytes stay in the bucket). Up to 5 GB."""
+    """
+    Copies a file inside the bucket (the bytes stay in the bucket). A file of 4 GiB or more
+    is copied in 512 MiB parts, side by side, since one copy call stops at 5 GiB.
+    """
     _check_key(source, "source")
     _check_key(destination, "destination")
     conf = settings()
+    client = _client(conf)
     try:
-        answer = _client(conf).copy_object(
+        size = int(client.head_object(Bucket=conf['bucket'], Key=source).get('ContentLength') or 0)
+        if size >= COPY_IN_PARTS_FROM:
+            client.copy(
+                {'Bucket': conf['bucket'], 'Key': source},
+                conf['bucket'],
+                destination,
+                Config=TransferConfig(
+                    multipart_threshold=COPY_IN_PARTS_FROM,
+                    multipart_chunksize=COPY_PART_SIZE,
+                    max_concurrency=10,
+                ),
+            )
+            etag = (client.head_object(Bucket=conf['bucket'], Key=destination).get('ETag') or '').strip('"')
+            return {'key': destination, 'etag': etag}
+        answer = client.copy_object(
             Bucket=conf['bucket'],
             Key=destination,
             CopySource={'Bucket': conf['bucket'], 'Key': source},
@@ -209,6 +235,109 @@ def copy(source, destination):
         raise _client_error(error, "copy the file")
     etag = (answer.get('CopyObjectResult', {}).get('ETag') or '').strip('"')
     return {'key': destination, 'etag': etag}
+
+
+def _check_upload_id(upload_id):
+    if not isinstance(upload_id, str) or not upload_id or len(upload_id) > 1024:
+        raise StorageError("upload_id must be the id that /v1/storage/upload/start gave.")
+    return upload_id
+
+
+def _upload_error(error, doing):
+    code = error.response.get('Error', {}).get('Code', '')
+    if code == 'NoSuchUpload':
+        return StorageError("That upload was finished, cancelled or never started.", 404)
+    if code in ('InvalidPart', 'InvalidPartOrder'):
+        return StorageError("A part is missing or its etag does not match what the bucket got.", 400)
+    if code == 'EntityTooSmall':
+        return StorageError("Every part but the last must be at least 5 MiB.", 400)
+    return _client_error(error, doing)
+
+
+def start_upload(key, content_type=None):
+    """Starts an upload in parts, for files too big for one PUT (over 5 GiB) or worth sending side by side."""
+    _check_key(key)
+    conf = settings()
+    params = {'Bucket': conf['bucket'], 'Key': key}
+    if content_type:
+        params['ContentType'] = content_type
+    try:
+        answer = _client(conf).create_multipart_upload(**params)
+    except ClientError as error:
+        raise _upload_error(error, "start the upload")
+    return {'key': key, 'upload_id': answer['UploadId']}
+
+
+def sign_parts(key, upload_id, part_numbers, expires_in=3600):
+    """One PUT link per part. The bucket answers each part with an ETag header, which complete needs."""
+    _check_key(key)
+    _check_upload_id(upload_id)
+    if not isinstance(part_numbers, list) or not part_numbers or len(part_numbers) > MAX_SIGNED_PARTS:
+        raise StorageError(f"part_numbers must list 1 to {MAX_SIGNED_PARTS} parts.")
+    for number in part_numbers:
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1 or number > MAX_PARTS:
+            raise StorageError(f"Part numbers go from 1 to {MAX_PARTS}.")
+    expires_in = int(expires_in)
+    if expires_in < 1 or expires_in > MAX_LINK_SECONDS:
+        raise StorageError(f"expires_in must be between 1 and {MAX_LINK_SECONDS} seconds.")
+    conf = settings()
+    client = _client(conf, for_links=True)
+    return {
+        'parts': [
+            {
+                'part_number': number,
+                'url': client.generate_presigned_url(
+                    'upload_part',
+                    Params={'Bucket': conf['bucket'], 'Key': key, 'UploadId': upload_id, 'PartNumber': number},
+                    ExpiresIn=expires_in,
+                    HttpMethod='PUT',
+                ),
+            }
+            for number in part_numbers
+        ],
+        'expires_in': expires_in,
+    }
+
+
+def complete_upload(key, upload_id, parts):
+    """Joins the parts into one file. `parts` lists every part's number and the ETag the bucket gave it."""
+    _check_key(key)
+    _check_upload_id(upload_id)
+    if not isinstance(parts, list) or not parts or len(parts) > MAX_PARTS:
+        raise StorageError(f"parts must list 1 to {MAX_PARTS} parts.")
+    listed = []
+    for part in parts:
+        number = part.get('part_number') if isinstance(part, dict) else None
+        etag = part.get('etag') if isinstance(part, dict) else None
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1 or number > MAX_PARTS:
+            raise StorageError(f"Part numbers go from 1 to {MAX_PARTS}.")
+        if not isinstance(etag, str) or not etag.strip('"'):
+            raise StorageError(f"Part {number} has no etag.")
+        listed.append({'PartNumber': number, 'ETag': '"' + etag.strip('"') + '"'})
+    listed.sort(key=lambda part: part['PartNumber'])
+    if len({part['PartNumber'] for part in listed}) != len(listed):
+        raise StorageError("A part number is listed twice.")
+    conf = settings()
+    try:
+        answer = _client(conf).complete_multipart_upload(
+            Bucket=conf['bucket'], Key=key, UploadId=upload_id, MultipartUpload={'Parts': listed},
+        )
+    except ClientError as error:
+        raise _upload_error(error, "finish the upload")
+    return {'key': key, 'etag': (answer.get('ETag') or '').strip('"')}
+
+
+def abort_upload(key, upload_id):
+    """Cancels an upload in parts and drops the parts already sent. One that is already gone is fine."""
+    _check_key(key)
+    _check_upload_id(upload_id)
+    conf = settings()
+    try:
+        _client(conf).abort_multipart_upload(Bucket=conf['bucket'], Key=key, UploadId=upload_id)
+    except ClientError as error:
+        if error.response.get('Error', {}).get('Code') != 'NoSuchUpload':
+            raise _upload_error(error, "cancel the upload")
+    return {'key': key, 'cancelled': True}
 
 
 def delete(keys):

@@ -18,11 +18,26 @@ On failure `code` is the HTTP status, `response` is `null` and `message` says wh
 | `/v1/storage/sign` | `{key, method?: "GET" \| "PUT", expires_in?: seconds (1 to 604800, default 3600), download_name?}` | `{url, method, expires_in}`. A `PUT` link uploads one file (send the bytes as the body). `download_name` makes a `GET` link download under that name. |
 | `/v1/storage/list` | `{prefix?, folders?: bool, next_token?, max_keys?: 1 to 1000}` | `{files: [{key, etag, size, last_modified}], folders: [...], next_token}`. With `folders: true` only the files straight inside `prefix` and the folders one level down. `last_modified` is in milliseconds. |
 | `/v1/storage/exists` | `{key}` | `{exists}`. A key ending in `/` asks whether anything is in that folder. |
-| `/v1/storage/copy` | `{source, destination}` | `{key, etag}`. The bytes stay in the bucket. Up to 5 GB. |
+| `/v1/storage/copy` | `{source, destination}` | `{key, etag}`. The bytes stay in the bucket. A file of 4 GiB or more is copied in 512 MiB parts, so there is no 5 GB limit. |
 | `/v1/storage/delete` | `{keys: [...]}` (1 to 1000) | `{deleted, failed}`. A key that is already gone counts as deleted. |
 | `/v1/storage/folder` | `{prefix}` | `{prefix}`. Makes an empty folder (an empty file whose key ends in `/`). |
 
-Browsers uploading with a `PUT` link need CORS allowed on the bucket for the app's address (methods `PUT`, `GET`, `HEAD`; header `Content-Type`).
+## Uploads in parts
+
+One `PUT` stops at 5 GiB. Bigger files (up to almost 5 TiB) go up in parts: start, sign links for the parts, `PUT` each part's bytes to its link (side by side is fine), then finish with every part's ETag.
+
+| Request | Body | Answer |
+|---|---|---|
+| `/v1/storage/upload/start` | `{key, content_type?}` | `{key, upload_id}` |
+| `/v1/storage/upload/sign` | `{key, upload_id, part_numbers: [1, 2, ...] (1 to 1000 per request), expires_in?}` | `{parts: [{part_number, url}], expires_in}`. Each `url` takes one `PUT` of that part's bytes; the bucket answers with an `ETag` header. Part numbers go from 1 to 10,000. |
+| `/v1/storage/upload/complete` | `{key, upload_id, parts: [{part_number, etag}]}` | `{key, etag}`. Every part but the last must be at least 5 MiB. A wrong ETag or missing part answers 400; an upload that was cancelled or never started answers 404. |
+| `/v1/storage/upload/abort` | `{key, upload_id}` | `{key, cancelled: true}`. Drops the parts already sent. Cancelling twice is fine. |
+
+On R2 each part is one Class A operation, so a 20 GB file in 100 MB parts is about 200 operations.
+
+## CORS
+
+Browsers uploading with a `PUT` link need CORS allowed on the bucket for the app's address (methods `PUT`, `GET`, `HEAD`; header `Content-Type`). For uploads in parts the bucket must also expose the `ETag` header, or the browser cannot read it.
 
 ## Example
 

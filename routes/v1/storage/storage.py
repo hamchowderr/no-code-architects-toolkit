@@ -26,6 +26,12 @@ queue, with {"code": 200, "response": {...}, "message": "success"}.
     POST /v1/storage/copy     {source, destination}  -> {key, etag}
     POST /v1/storage/delete   {keys: [...]}  -> {deleted, failed}
     POST /v1/storage/folder   {prefix}  -> {prefix}
+
+    Uploads in parts (files over 5 GiB, or sent side by side):
+    POST /v1/storage/upload/start     {key, content_type}  -> {key, upload_id}
+    POST /v1/storage/upload/sign      {key, upload_id, part_numbers, expires_in}  -> {parts: [{part_number, url}]}
+    POST /v1/storage/upload/complete  {key, upload_id, parts: [{part_number, etag}]}  -> {key, etag}
+    POST /v1/storage/upload/abort     {key, upload_id}  -> {key, cancelled}
 """
 
 import logging
@@ -142,3 +148,80 @@ def storage_delete():
 })
 def storage_folder():
     return _answer(bucket.make_folder, _body()['prefix'])
+
+
+UPLOAD_ID = {"type": "string", "minLength": 1, "maxLength": 1024}
+PART_NUMBER = {"type": "integer", "minimum": 1, "maximum": bucket.MAX_PARTS}
+
+
+@v1_storage_bp.route('/v1/storage/upload/start', methods=['POST'])
+@authenticate
+@validate_payload({
+    "type": "object",
+    "properties": {"key": KEY, "content_type": {"type": "string", "maxLength": 255}},
+    "required": ["key"],
+    "additionalProperties": False,
+})
+def storage_upload_start():
+    data = _body()
+    return _answer(bucket.start_upload, data['key'], data.get('content_type'))
+
+
+@v1_storage_bp.route('/v1/storage/upload/sign', methods=['POST'])
+@authenticate
+@validate_payload({
+    "type": "object",
+    "properties": {
+        "key": KEY,
+        "upload_id": UPLOAD_ID,
+        "part_numbers": {"type": "array", "items": PART_NUMBER, "minItems": 1,
+                         "maxItems": bucket.MAX_SIGNED_PARTS},
+        "expires_in": {"type": "integer", "minimum": 1, "maximum": bucket.MAX_LINK_SECONDS},
+    },
+    "required": ["key", "upload_id", "part_numbers"],
+    "additionalProperties": False,
+})
+def storage_upload_sign():
+    data = _body()
+    return _answer(bucket.sign_parts, data['key'], data['upload_id'], data['part_numbers'],
+                   data.get('expires_in', 3600))
+
+
+@v1_storage_bp.route('/v1/storage/upload/complete', methods=['POST'])
+@authenticate
+@validate_payload({
+    "type": "object",
+    "properties": {
+        "key": KEY,
+        "upload_id": UPLOAD_ID,
+        "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": bucket.MAX_PARTS,
+            "items": {
+                "type": "object",
+                "properties": {"part_number": PART_NUMBER, "etag": {"type": "string", "minLength": 1}},
+                "required": ["part_number", "etag"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["key", "upload_id", "parts"],
+    "additionalProperties": False,
+})
+def storage_upload_complete():
+    data = _body()
+    return _answer(bucket.complete_upload, data['key'], data['upload_id'], data['parts'])
+
+
+@v1_storage_bp.route('/v1/storage/upload/abort', methods=['POST'])
+@authenticate
+@validate_payload({
+    "type": "object",
+    "properties": {"key": KEY, "upload_id": UPLOAD_ID},
+    "required": ["key", "upload_id"],
+    "additionalProperties": False,
+})
+def storage_upload_abort():
+    data = _body()
+    return _answer(bucket.abort_upload, data['key'], data['upload_id'])
