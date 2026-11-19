@@ -161,6 +161,18 @@ COPY ./fonts /usr/share/fonts/custom
 # Rebuild the font cache so that fontconfig can see the custom fonts
 RUN fc-cache -f -v
 
+# Node.js and HyperFrames (Apache-2.0, open source), which draws /v1/video/motion's pieces
+# in the Chromium that Playwright installs below
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    npm install -g hyperframes@0.9.70 && \
+    npm cache clean --force
+ENV HYPERFRAMES_NO_TELEMETRY=1 \
+    HYPERFRAMES_TELEMETRY_DISABLED=1 \
+    HYPERFRAMES_SKIP_SKILLS=1 \
+    DO_NOT_TRACK=1
+
 # Set work directory
 WORKDIR /app
 
