@@ -27,6 +27,13 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: whisper-tiny-v1
+      - name: Cache the picture model
+        uses: actions/cache@v4
+        with:
+          path: models/look
+          key: look-clip-b32-6b7c523
+      - name: Picture model
+        run: python models/look/fetch.py
       - name: Run tests
         env:
           HYPERFRAMES_BROWSER_PATH: /usr/bin/google-chrome

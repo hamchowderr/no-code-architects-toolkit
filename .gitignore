@@ -4,3 +4,6 @@
 .env__pycache__/
 *.pyc
 .pytest_cache/
+models/look/*.onnx
+models/look/tokenizer.json
+models/look/*.part

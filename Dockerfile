@@ -202,6 +202,11 @@ USER appuser
 # Download the faster-whisper model now so the first transcription does not wait for it
 RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ.get('WHISPER_MODEL', 'base'), device='cpu', compute_type='int8', download_root=os.environ['WHISPER_CACHE_DIR'])"
 
+# Download the picture model for /v1/media/look (CLIP, about 150 MB, checked by SHA-256)
+ENV LOOK_MODEL_DIR=/app/look_models
+COPY models/look/fetch.py /tmp/fetch_look.py
+RUN python /tmp/fetch_look.py ${LOOK_MODEL_DIR}
+
 # Install Playwright Chromium browser as appuser
 RUN playwright install chromium
 
