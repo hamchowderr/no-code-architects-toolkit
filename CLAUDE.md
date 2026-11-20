@@ -117,7 +117,10 @@ gunicorn --config gunicorn.conf.py app:app
 ### Docker
 
 ```bash
-# Build image
+# Use the published image
+docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:latest
+
+# Or build it (slow: compiles FFmpeg)
 docker build -t no-code-architects-toolkit .
 
 # Run container
@@ -235,7 +238,9 @@ See [docs/adding_routes.md](docs/adding_routes.md) for full guide.
 
 ## Contributing
 
-- Submit PRs to `build` branch (not main)
+- This is Chowderr's fork (hamchowderr/no-code-architects-toolkit). PRs go to `main`. (The original, stephengpope/no-code-architects-toolkit, takes PRs on `build`.)
+- Every push to `main` publishes `ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>` and `:latest` (`.github/workflows/toolkit-image.yml`). Servers pull that image; never make a server build it (FFmpeg compiles from source for 20 to 40 minutes).
+- Tests: `python -m pytest tests` (`.github/workflows/tests.yml`). `tests/test_docs.py` fails when a setting the code reads is not documented, or a link in the docs is broken.
 - Use auto-versioning: builds auto-increment via GitHub Actions
 - Update README.md when adding new endpoints
 - Follow GPL-2.0 license (see [LICENSE](LICENSE))

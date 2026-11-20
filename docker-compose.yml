@@ -21,7 +21,10 @@ services:
       - traefik_data:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
   ncat:
-    build: .
+    # The prebuilt image from GitHub's registry. Pin a commit (:sha-<commit>) on a server
+    # you rely on. To build from this folder instead, swap this line for `build: .`
+    # (it compiles FFmpeg and takes 20 to 40 minutes).
+    image: ${NCAT_IMAGE:-ghcr.io/hamchowderr/no-code-architects-toolkit:latest}
     env_file:
       - .env
     labels:
