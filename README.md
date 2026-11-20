@@ -34,7 +34,7 @@ The toolkit runs on a rented server, or on a machine of your own that stays on a
 - **CPU:** 4 cores at least. FFmpeg work uses every core it is given, so more cores means faster encodes and more jobs at once.
 - **Memory:** about 450 MB idle, plus about 0.5 GB for each transcription running at once with the default `base` model. 8 GB is a comfortable start.
 - **Disk:** room for the image and for the files being worked on (`LOCAL_STORAGE_PATH`); finished files go to the bucket.
-- **Processor type:** the published image is x86-64 (Intel and AMD) only. On an Apple Silicon Mac, Docker Desktop runs it through emulation, which is slower.
+- **Processor type:** the published image is made for both kinds of processor, and Docker picks the right one by itself: Intel and AMD (most servers, Windows PCs with Docker Desktop, Intel Macs) and ARM (Apple-chip Macs such as the Mac Mini, Ampere and Graviton servers). Each is built and tested on its own kind of machine, so neither runs through emulation.
 
 ## 👥 No-Code Architects Community
 
