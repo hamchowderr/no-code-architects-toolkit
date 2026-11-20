@@ -39,6 +39,8 @@ ENDPOINT = "/v1/media/look"
     "properties": {
         "media_url": {"type": "string", "format": "uri"},
         "every": {"type": "number", "minimum": 0.5, "maximum": 60},
+        "cuts": {"type": "boolean"},
+        "frames": {"type": "boolean"},
         "image_urls": {
             "type": "array",
             "maxItems": service.MAX_IMAGES,
@@ -72,7 +74,14 @@ def look(job_id, data):
                 except Exception as e:  # one bad link should not lose the rest
                     logger.warning(f"Job {job_id}: could not download {url}: {e}")
                     pictures.append((url, None))
-        result = service.look(media_path, pictures, data.get("texts"), data.get("every"))
+        result = service.look(
+            media_path,
+            pictures,
+            data.get("texts"),
+            data.get("every"),
+            cuts=bool(data.get("cuts")),
+            frames=data.get("frames", True) is not False,
+        )
         logger.info(f"Job {job_id}: looked at {'a file' if media_path else 'no file'}, {len(pictures or [])} pictures, {len(data.get('texts') or [])} texts")
         return result, ENDPOINT, 200
     except service.LookError as e:
