@@ -9,6 +9,8 @@ Installation of No Code Architect Toolkit with Docker offers the following advan
 > If your domain/subdomain is already pointed to the server, start at step 2.  
 > If you have already installed Docker and Docker-Compose, start at step 3.
 
+The image this guide pulls (`ghcr.io/hamchowderr/no-code-architects-toolkit`) is published for Intel/AMD and for ARM (Apple-chip Macs such as the Mac Mini, Graviton and Ampere servers). Docker picks the right one by itself, so the same steps work on Linux, on a Mac with Docker Desktop and on Windows with Docker Desktop.
+
 ---
 
 ## 1. DNS Setup

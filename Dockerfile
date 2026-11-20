@@ -64,15 +64,18 @@ RUN git clone https://github.com/Haivision/srt.git && \
     make install && \
     cd ../.. && rm -rf srt
 
-# Install SVT-AV1 from source
-RUN git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git && \
-    cd SVT-AV1 && \
-    git checkout v0.9.0 && \
-    cd Build && \
-    cmake .. && \
-    make -j$(nproc) && \
-    make install && \
-    cd ../.. && rm -rf SVT-AV1
+# Install SVT-AV1 0.9 from source on Intel/AMD, as before. On ARM (Apple chips, Ampere,
+# Graviton, Raspberry Pi) FFmpeg uses Debian's own SVT-AV1 (libsvtav1enc-dev, above).
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+      git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git && \
+      cd SVT-AV1 && \
+      git checkout v0.9.0 && \
+      cd Build && \
+      cmake .. && \
+      make -j$(nproc) && \
+      make install && \
+      cd ../.. && rm -rf SVT-AV1; \
+    fi
 
 # Install libvmaf from source
 RUN git clone https://github.com/Netflix/vmaf.git && \
@@ -117,9 +120,12 @@ RUN git clone https://github.com/libass/libass.git && \
 RUN git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg && \
     cd ffmpeg && \
     git checkout n7.0.2 && \
-    PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig" \
+    # The system library folder is named after the processor (x86_64-linux-gnu or
+    # aarch64-linux-gnu), so the same file builds for Intel/AMD and for ARM.
+    LIBDIR="/usr/lib/$(gcc -dumpmachine)" && \
+    PKG_CONFIG_PATH="$LIBDIR/pkgconfig:/usr/local/lib/pkgconfig" \
     CFLAGS="-I/usr/include/freetype2" \
-    LDFLAGS="-L/usr/lib/x86_64-linux-gnu" \
+    LDFLAGS="-L$LIBDIR" \
     ./configure --prefix=/usr/local \
         --enable-gpl \
         --enable-pthreads \
@@ -146,7 +152,7 @@ RUN git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg && \
         --enable-libsrt \
         --enable-filter=drawtext \
         --extra-cflags="-I/usr/include/freetype2 -I/usr/include/libpng16 -I/usr/include" \
-        --extra-ldflags="-L/usr/lib/x86_64-linux-gnu -lfreetype -lfontconfig" \
+        --extra-ldflags="-L$LIBDIR -lfreetype -lfontconfig" \
         --enable-gnutls \
     && make -j$(nproc) && \
     make install && \

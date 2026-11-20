@@ -6,7 +6,7 @@ Read [CLAUDE.md](CLAUDE.md) for how the code is laid out and how to add a route.
 
 - This is Chowderr's fork of the NCA Toolkit. It is free and open source (GPL-2.0). Kontifi runs on this fork only; it works on its own too, from n8n or any HTTP client.
 - Run the published image, `ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>` (or `:latest`). Never configure a server to build it.
-- The image is x86-64 only and about 6 GB.
+- The image is about 6 GB and published for amd64 (Intel/AMD, Windows PCs) and arm64 (Apple-chip Macs, Graviton); Docker picks the right one. Each is built on its own kind of runner, never through emulation.
 
 ## Setting one up
 

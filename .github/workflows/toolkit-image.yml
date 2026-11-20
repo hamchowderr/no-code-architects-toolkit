@@ -3,8 +3,12 @@ name: Toolkit image
 # Builds the toolkit's Docker image here on GitHub instead of on the shared server that
 # runs it. The image compiles FFmpeg and its video libraries from source, which takes
 # 20 to 40 minutes on the server and slows every other app there while it runs.
-# Pull requests only build the image and start it. Pushes to main also publish it to
-# GHCR, so the server only downloads a finished image:
+#
+# It is built twice, each on a machine of that kind, never through emulation:
+#   amd64  Intel and AMD: most servers, Windows PCs, Intel Macs
+#   arm64  ARM: Apple-chip Macs (Mac Mini), Ampere and Graviton servers, Raspberry Pi 5
+# Pull requests build both and start each one. Pushes to main also publish them under
+# one name, so Docker picks the right one for the machine by itself:
 #   ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>  (pin this one)
 #   ghcr.io/hamchowderr/no-code-architects-toolkit:latest
 on:
@@ -23,10 +27,23 @@ permissions:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
+  PUBLISH: ${{ github.event_name != 'pull_request' }}
 
 jobs:
   image:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            # The cache the single-processor build used, so it is not built from scratch.
+            cache: toolkit
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            cache: toolkit-arm64
+    name: image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     # The first build compiles FFmpeg from scratch; later ones reuse the layer cache.
     timeout-minutes: 120
     permissions:
@@ -39,10 +56,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/${{ matrix.arch }}
           load: true
           tags: nca-toolkit:check
-          cache-from: type=gha,scope=toolkit
-          cache-to: type=gha,scope=toolkit,mode=max
+          cache-from: type=gha,scope=${{ matrix.cache }}
+          cache-to: type=gha,scope=${{ matrix.cache }},mode=max
       - name: Start it and wait for the API to answer
         run: |
           docker run -d --name toolkit -p 8080:8080 \
@@ -56,29 +74,95 @@ jobs:
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/toolkit/test || true)
             if [ "$code" = "401" ]; then
               echo "API answered ($code)"
-              docker exec toolkit ffmpeg -hide_banner -version | head -1
               exit 0
             fi
             sleep 2
           done
           docker logs toolkit
           exit 1
+      - name: Check the tools inside it work on this processor
+        run: |
+          docker exec toolkit uname -m
+          docker exec toolkit ffmpeg -hide_banner -version | head -1
+          # Encode a short clip with the encoders the endpoints use, and burn in a caption.
+          docker exec toolkit sh -c '
+            set -e
+            cd /tmp
+            printf "1\n00:00:00,000 --> 00:00:01,000\nHello\n" > c.srt
+            ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc=size=320x240:rate=25 \
+              -f lavfi -i sine=frequency=440 -t 2 -vf subtitles=c.srt \
+              -c:v libx264 -c:a aac out.mp4
+            ffmpeg -hide_banner -loglevel error -y -i out.mp4 -t 1 -c:v libx265 out265.mp4
+            ffmpeg -hide_banner -loglevel error -y -i out.mp4 -t 1 -c:v libsvtav1 out.mkv
+            ffmpeg -hide_banner -loglevel error -y -i out.mp4 -t 1 -c:v libvpx-vp9 out.webm
+            ffmpeg -hide_banner -loglevel error -y -i out.mp4 -vn -c:a libmp3lame out.mp3
+            ls -l out*'
+          # Transcription, face finding and the picture model load and run here.
+          docker exec toolkit python -c "
+          import os, numpy as np
+          from faster_whisper import WhisperModel
+          m = WhisperModel(os.environ.get('WHISPER_MODEL', 'base'), device='cpu', compute_type='int8', download_root=os.environ['WHISPER_CACHE_DIR'])
+          segments, info = m.transcribe(np.zeros(16000, dtype=np.float32))
+          list(segments)
+          print('faster-whisper ok', info.language)
+          import cv2, onnxruntime
+          print('opencv', cv2.__version__, 'onnxruntime', onnxruntime.__version__)
+          "
+          docker exec toolkit node --version
+          docker exec toolkit sh -c 'ls ~/.cache/ms-playwright'
       - name: Image size
         run: docker image inspect nca-toolkit:check --format '{{.Size}}' | awk '{ printf "%.0f MB\n", $1 / 1000000 }'
-      - if: github.event_name != 'pull_request'
+      - if: env.PUBLISH == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish
-        if: github.event_name != 'pull_request'
+      # Each machine publishes its half without a tag; the next job joins them.
+      - name: Publish this half
+        id: push
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:sha-${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=gha,scope=toolkit
+          cache-from: type=gha,scope=${{ matrix.cache }}
+      - if: env.PUBLISH == 'true'
+        run: |
+          mkdir -p digests
+          echo "${{ steps.push.outputs.digest }}" > "digests/${{ matrix.arch }}"
+      - if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/${{ matrix.arch }}
+          retention-days: 1
+
+  # Puts both halves under the sha-<commit> and latest tags.
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Join the two halves under one name
+        run: |
+          docker buildx imagetools create \
+            -t "$IMAGE:sha-$GITHUB_SHA" -t "$IMAGE:latest" \
+            "$IMAGE@$(cat digests/amd64)" "$IMAGE@$(cat digests/arm64)"
+          docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA"
