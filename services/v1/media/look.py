@@ -24,6 +24,9 @@ The dashboard keeps the vectors and compares them; nothing here decides what mat
 Each frame also says how much of it the largest face covers (YuNet, as in reframe), which
 tells a talking head apart from a cutaway shot.
 
+Asked for, it also finds the video's camera cuts (as reframe does), so a cutaway laid over
+the video can line up with them instead of landing in the middle of a short shot.
+
 Runs on CPU through ONNX Runtime with the quantized model (models/look, fetched at build).
 """
 
@@ -55,6 +58,12 @@ MAX_IMAGES = 60
 MAX_TEXTS = 200
 DEFAULT_EVERY = 2.0  # seconds between sampled frames, stretched so a long video stays under MAX_FRAMES
 DECIMALS = 4
+
+CUT_FPS = 10  # frames a second read when finding camera cuts
+CUT_WIDTH = 160  # ...at this width: enough to tell one shot from the next
+CUT_THRESHOLD = 0.12  # histogram distance that counts as a camera cut (as in reframe)
+CUT_RATIO = 6  # ...and this many times the usual change over the last second
+MAX_CUTS = 2000
 
 _lock = threading.Lock()
 _sessions = {}
@@ -267,11 +276,65 @@ def look_at_media(path, every=None):
     }
 
 
-def look(media_path=None, picture_paths=None, texts=None, every=None):
-    """Everything asked for in one answer. `picture_paths` is a list of (url, path or None)."""
+def camera_cuts(path):
+    """When the picture cuts from one shot to another, in seconds.
+
+    The same test as reframe: the colour histogram of a frame against the one before, a cut
+    when the change is large both by itself and next to the usual change over the last
+    second, and never two within half a second.
+    """
+    import cv2
+
+    info = probe(path)
+    if info["duration"] <= 0.05 or not info["width"] or not info["height"]:
+        return []
+    height = max(2, round(info["height"] * CUT_WIDTH / info["width"] / 2) * 2)
+    proc = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-i", path, "-an", "-vf", f"fps={CUT_FPS},scale={CUT_WIDTH}:{height}",
+         "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    )
+    size = CUT_WIDTH * height * 3
+    cuts, recent, before, n = [], [], None, 0
+    try:
+        while len(cuts) < MAX_CUTS:
+            buf = proc.stdout.read(size)
+            if len(buf) < size:
+                break
+            frame = np.frombuffer(buf, np.uint8).reshape(height, CUT_WIDTH, 3)
+            hist = cv2.calcHist([cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)], [0, 1], None, [16, 8], [0, 180, 0, 256])
+            cv2.normalize(hist, hist)
+            if before is not None:
+                change = cv2.compareHist(before, hist, cv2.HISTCMP_BHATTACHARYYA)
+                usual = float(np.median(recent)) if recent else 0.0
+                last = round(cuts[-1] * CUT_FPS) if cuts else -CUT_FPS
+                if change > CUT_THRESHOLD and change > CUT_RATIO * usual and n - last > CUT_FPS // 2:
+                    cuts.append(round(n / CUT_FPS, 2))
+                recent = (recent + [change])[-CUT_FPS:]
+            before = hist
+            n += 1
+    finally:
+        proc.stdout.close()
+        proc.kill()
+        proc.wait()
+    return cuts
+
+
+def look(media_path=None, picture_paths=None, texts=None, every=None, cuts=False, frames=True):
+    """Everything asked for in one answer. `picture_paths` is a list of (url, path or None).
+
+    For a file: its frames (unless `frames` is False) and, when `cuts` is True, its camera
+    cuts.
+    """
     result = {"model": MODEL_NAME}
     if media_path:
-        result["media"] = look_at_media(media_path, every)
+        if frames:
+            result["media"] = look_at_media(media_path, every)
+        else:
+            info = probe(media_path)
+            result["media"] = {"duration": round(info["duration"], 3), "width": info["width"], "height": info["height"]}
+        if cuts:
+            result["media"]["cuts"] = camera_cuts(media_path)
     if picture_paths is not None:
         pictures, rgbs, where = [], [], []
         for url, path in picture_paths:
