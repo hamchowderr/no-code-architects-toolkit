@@ -15,27 +15,6 @@ You can deploy this toolkit in several ways. It works with Docker. It runs on Go
 
 Easily replace services like ChatGPT Whisper, Cloud Convert, Createomate, JSON2Video, PDF(dot)co, Placid and OCodeKit.
 
-## This Fork
-
-This is [Chowderr's fork](https://github.com/hamchowderr/no-code-architects-toolkit) of [Stephen Pope's toolkit](https://github.com/stephengpope/no-code-architects-toolkit). It is the toolkit Kontifi runs on, and it works on its own too, from n8n or any HTTP client. What it adds:
-
-- A prebuilt image on GitHub's registry, so no machine has to compile FFmpeg (see [Run The Prebuilt Image](#run-the-prebuilt-image)).
-- A shared Redis job queue that runs jobs side by side, and faster-whisper transcription ([docs](docs/toolkit/queue_and_transcription.md)).
-- Storage requests (`/v1/storage/*`), so an app in front of the toolkit needs only its address and API key.
-- `/v1/toolkit/health`, `/v1/media/look`, `/v1/video/reframe` and `/v1/video/motion`, listed below.
-- Jobs left running by a restart are finished as failed instead of staying "running" forever.
-
-Pull requests for this fork go to its `main` branch.
-
-## Hosting
-
-The toolkit runs on a rented server, or on a machine of your own that stays on around the clock (a Mac Mini is a good example). It needs Docker, and its image takes about 6 GB of disk.
-
-- **CPU:** 4 cores at least. FFmpeg work uses every core it is given, so more cores means faster encodes and more jobs at once.
-- **Memory:** about 450 MB idle, plus about 0.5 GB for each transcription running at once with the default `base` model. 8 GB is a comfortable start.
-- **Disk:** room for the image and for the files being worked on (`LOCAL_STORAGE_PATH`); finished files go to the bucket.
-- **Processor type:** the published image is x86-64 (Intel and AMD) only. On an Apple Silicon Mac, Docker Desktop runs it through emulation, which is slower.
-
 ## 👥 No-Code Architects Community
 
 Want help? Join a supportive community and get dedicated tech support.
@@ -60,121 +39,121 @@ Each endpoint is supported by robust payload validation and detailed API documen
 
 ### Audio
 
-- **[`/v1/audio/concatenate`](docs/audio/concatenate.md)**
+- **[`/v1/audio/concatenate`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/audio/concatenate.md)**
   - Combines multiple audio files into a single audio file.
 
 ### Code
 
-- **[`/v1/code/execute/python`](docs/code/execute/execute_python.md)**
+- **[`/v1/code/execute/python`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/code/execute/execute_python.md)**
   - Executes Python code remotely and returns the execution results.
 
 ### FFmpeg
 
-- **[`/v1/ffmpeg/compose`](docs/ffmpeg/ffmpeg_compose.md)**
+- **[`/v1/ffmpeg/compose`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/ffmpeg/ffmpeg_compose.md)**
   - Provides a flexible interface to FFmpeg for complex media processing operations.
 
 ### Image
 
-- **[`/v1/image/convert/video`](docs/image/convert/image_to_video.md)**
+- **[`/v1/image/convert/video`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/image/convert/image_to_video.md)**
   - Transforms a static image into a video with custom duration and zoom effects.
 
-- **[`/v1/image/screenshot/webpage`](docs/image/screenshot_webpage.md)**
+- **[`/v1/image/screenshot/webpage`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/image/screenshot_webpage.md)**
   - Captures screenshots of web pages using Playwright with advanced options like viewport size, device emulation, and custom HTML/CSS/JS injection.
 
 ### Media
 
-- **[`/v1/media/convert`](docs/media/convert/media_convert.md)**
+- **[`/v1/media/convert`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/convert/media_convert.md)**
   - Converts media files from one format to another with customizable codec options.
 
-- **[`/v1/media/convert/mp3`](docs/media/convert/media_to_mp3.md)**
+- **[`/v1/media/convert/mp3`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/convert/media_to_mp3.md)**
   - Converts various media formats specifically to MP3 audio.
 
-- **[`/v1/BETA/media/download`](docs/media/download.md)**
+- **[`/v1/BETA/media/download`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/download.md)**
   - Downloads media content from various online sources using yt-dlp.
 
-- **[`/v1/media/feedback`](docs/media/feedback.md)**
+- **[`/v1/media/feedback`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/feedback.md)**
   - Provides a web interface for collecting and displaying feedback on media content.
 
-- **[`/v1/media/transcribe`](docs/media/media_transcribe.md)**
+- **[`/v1/media/transcribe`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/media_transcribe.md)**
   - Transcribes or translates audio/video content from a provided media URL.
 
-- **[`/v1/media/silence`](docs/media/silence.md)**
+- **[`/v1/media/silence`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/silence.md)**
   - Detects silence intervals in a given media file.
 
-- **[`/v1/media/metadata`](docs/media/metadata.md)**
+- **[`/v1/media/metadata`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/metadata.md)**
   - Extracts comprehensive metadata from media files including format, codecs, resolution, and bitrates.
 
-- **[`/v1/media/look`](docs/media/look.md)** (this fork only)
+- **[`/v1/media/look`](docs/media/look.md)**
   - Describes frames, pictures and words as CLIP vectors so they can be matched to each other, and finds a video's camera cuts.
 
 ### S3
 
-- **[`/v1/s3/upload`](docs/s3/upload.md)**
+- **[`/v1/s3/upload`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/s3/upload.md)**
   - Uploads files to Amazon S3 storage by streaming directly from a URL.
 
-### Storage (this fork)
+### Storage
 
 - **[`/v1/storage/*`](docs/storage/storage.md)**
   - Signed upload and download links, folder listings, copy and delete for the toolkit's own bucket, so apps in front of the toolkit only need its address and API key.
 
 ### Toolkit
 
-- **[`/v1/toolkit/authenticate`](docs/toolkit/authenticate.md)**
+- **[`/v1/toolkit/authenticate`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/toolkit/authenticate.md)**
   - Provides a simple authentication mechanism to validate API keys.
 
-- **[`/v1/toolkit/health`](docs/toolkit/health.md)** (this fork only)
+- **[`/v1/toolkit/health`](docs/toolkit/health.md)**
   - Reports CPU, memory, work-file disk, the job queue, the last hour's jobs and the build.
 
-- **[`/v1/toolkit/test`](docs/toolkit/test.md)**
+- **[`/v1/toolkit/test`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/toolkit/test.md)**
   - Verifies that the NCA Toolkit API is properly installed and functioning.
 
-- **[`/v1/toolkit/job/status`](docs/toolkit/job_status.md)**
+- **[`/v1/toolkit/job/status`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/toolkit/job_status.md)**
   - Retrieves the status of a specific job by its ID.
 
-- **[`/v1/toolkit/jobs/status`](docs/toolkit/jobs_status.md)**
+- **[`/v1/toolkit/jobs/status`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/toolkit/jobs_status.md)**
   - Retrieves the status of all jobs within a specified time range.
 
 ### Video
 
-- **[`/v1/video/caption`](docs/video/caption_video.md)**
+- **[`/v1/video/caption`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/caption_video.md)**
   - Adds customizable captions to videos with various styling options.
 
-- **[`/v1/video/concatenate`](docs/video/concatenate.md)**
+- **[`/v1/video/concatenate`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/concatenate.md)**
   - Combines multiple videos into a single continuous video file.
 
-- **[`/v1/video/thumbnail`](docs/video/thumbnail.md)**
+- **[`/v1/video/thumbnail`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/thumbnail.md)**
   - Extracts a thumbnail image from a specific timestamp in a video.
 
-- **[`/v1/video/cut`](docs/video/cut.md)**
+- **[`/v1/video/cut`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/cut.md)**
   - Cuts specified segments from a video file with optional encoding settings.
 
-- **[`/v1/video/split`](docs/video/split.md)**
+- **[`/v1/video/split`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/split.md)**
   - Splits a video into multiple segments based on specified start and end times.
 
-- **[`/v1/video/trim`](docs/video/trim.md)**
+- **[`/v1/video/trim`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/video/trim.md)**
   - Trims a video by keeping only the content between specified start and end times.
 
-- **[`/v1/video/reframe`](docs/video/reframe.md)** (this fork only)
+- **[`/v1/video/reframe`](docs/video/reframe.md)**
   - Turns a wide video into a tall (or square) one that follows whoever is talking.
 
-- **[`/v1/video/motion`](docs/video/motion.md)** (this fork only)
+- **[`/v1/video/motion`](docs/video/motion.md)**
   - Lays motion graphics (lower thirds, titles, stat cards, follow cards and more) and sound effects over a video.
 
 ---
 
-## Run The Prebuilt Image
+## Docker Build and Run
 
-GitHub Actions builds this fork's image and publishes it for every commit on `main`:
+### Build the Docker Image
 
-```bash
-docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:latest
-# or pin one commit, which is what a server you rely on should do:
-docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>
-```
+   ```bash
+   docker build -t no-code-architects-toolkit .
+   ```
 
-[`docker-compose.yml`](docker-compose.yml) runs it with Redis and HTTPS; see the [Docker Compose guide](docker-compose.md). Building the image yourself (`docker build -t no-code-architects-toolkit .`) compiles FFmpeg from source and takes 20 to 40 minutes, so do it on a machine nobody else is using, never on the server that runs your apps.
+   Or pull the prebuilt image instead of building (the build compiles FFmpeg and takes 20 to 40 minutes):
 
-## Settings
+   ```bash
+   docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:latest
+   ```
 
 ### General Environment Variables
 
@@ -207,12 +186,11 @@ docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>
 - **Requirement**: Mandatory if using S3-compatible storage, "None" is acceptible for some s3 providers.
 
 #### `S3_PUBLIC_URL`
-- **Purpose**: Public prefix used in returned file links instead of `S3_ENDPOINT_URL/S3_BUCKET_NAME`. Useful when uploads go to an internal endpoint (e.g. `http://minio:9000` on the same Docker network) or when the bucket is served from a custom domain (e.g. Cloudflare R2).
-- **Example**: `https://files.example.com/nca-toolkit` (MinIO, bucket in the path) or `https://files.example.com` (R2 custom domain).
+- **Purpose**: Public prefix used in returned file links instead of `S3_ENDPOINT_URL/S3_BUCKET_NAME`, for example a Cloudflare R2 custom domain.
 - **Requirement**: Optional.
 
 #### `S3_LINK_ENDPOINT_URL`
-- **Purpose**: The bucket address browsers use, when `S3_ENDPOINT_URL` is an internal one (e.g. `http://minio:9000`). Signed links from `/v1/storage/sign` are made for this address. Not needed for R2, S3 or Spaces.
+- **Purpose**: The bucket address browsers use when `S3_ENDPOINT_URL` is an internal one (e.g. `http://minio:9000`). Signed links from `/v1/storage/sign` are made for this address.
 - **Requirement**: Optional.
 
 #### `S3_ADDRESSING_STYLE`
@@ -236,9 +214,9 @@ docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>
 ### Performance Tuning Variables
 
 #### `REDIS_URL`
-- **Purpose**: One shared job queue. Jobs with a `webhook_url` run at the same time on `QUEUE_WORKERS` worker processes (default: half the CPU cores) instead of one at a time per Gunicorn worker. The API and webhooks are unchanged.
-- **Default**: not set (each Gunicorn worker keeps its own queue, as before)
-- **More**: [docs/toolkit/queue_and_transcription.md](docs/toolkit/queue_and_transcription.md), which also covers the faster-whisper settings (`WHISPER_MODEL`, `WHISPER_DEVICE`, ...).
+- **Purpose**: One shared job queue, so jobs with a `webhook_url` run side by side on `QUEUE_WORKERS` worker processes.
+- **Default**: not set (each Gunicorn worker keeps its own queue)
+- **More**: [docs/toolkit/queue_and_transcription.md](docs/toolkit/queue_and_transcription.md), which also covers `QUEUE_WORKERS` and the faster-whisper settings. Settings most people never change are in [docs/toolkit/other_settings.md](docs/toolkit/other_settings.md).
 
 #### `MAX_QUEUE_LENGTH`
 - **Purpose**: Limits the maximum number of concurrent tasks in the queue.
@@ -247,30 +225,13 @@ docker pull ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>
 
 #### `GUNICORN_WORKERS`
 - **Purpose**: Number of worker processes for handling requests.
-- **Default**: 2
-- **Recommendation**: With `REDIS_URL` set, the queue workers do the heavy work and 2 is enough. Without it, raise this to run more jobs at once.
+- **Default**: Number of CPU cores + 1
+- **Recommendation**: 2-4× number of CPU cores for CPU-bound workloads.
 
 #### `GUNICORN_TIMEOUT`
-- **Purpose**: Timeout (in seconds) for a request that runs without a `webhook_url`.
-- **Default**: 300
-- **Recommendation**: Send a `webhook_url` for anything long instead of raising this.
-
-#### `QUEUE_WORKERS`, `ABANDONED_CHECK_SECONDS` and the transcription settings
-- See [docs/toolkit/queue_and_transcription.md](docs/toolkit/queue_and_transcription.md).
-
-### Other Settings
-
-These have working defaults; most people never set them.
-
-| Variable | Default | What it does |
-| --- | --- | --- |
-| `WHISPER_CACHE_DIR` | `/app/whisper_cache` | Where transcription models are kept. The image already holds the `base` model. |
-| `LOOK_MODEL_DIR` | `/app/look_models` | Where `/v1/media/look`'s picture model is kept. The image already holds it. |
-| `HYPERFRAMES_BIN` | `hyperframes` | The program `/v1/video/motion` draws its pieces with. |
-| `MOTION_RENDER_TIMEOUT` | `1800` | Seconds `/v1/video/motion` may spend drawing. |
-| `PLAYWRIGHT_BROWSERS_PATH` | Playwright's own | Where the browser used for drawing and screenshots is. |
-| `GDRIVE_USER` | not set | The Google Workspace user the old `/gdrive-upload` route acts as. |
-| `GCP_JOB_NAME`, `GCP_JOB_LOCATION` | not set, `us-central1` | Hand long jobs to a Google Cloud Run Job. `DISABLE_CLOUD_JOB=true` turns it off again. `CLOUD_RUN_JOB`, `CLOUD_RUN_EXECUTION`, `GCP_JOB_PATH` and `GCP_JOB_PAYLOAD` are set by Cloud Run itself. |
+- **Purpose**: Timeout (in seconds) for worker processes.
+- **Default**: 30
+- **Recommendation**: Increase for processing large media files (e.g., 300-600).
 
 ---
 
@@ -318,7 +279,7 @@ These have working defaults; most people never set them.
      -e GUNICORN_WORKERS=4 \
      -e GUNICORN_TIMEOUT=300 \
      
-     ghcr.io/hamchowderr/no-code-architects-toolkit:latest
+     no-code-architects-toolkit
    ```
 
 ---
@@ -337,7 +298,7 @@ You need to use the "webhook_url" (for any request that exceeds 1 min) in your A
 
 If you use the webhook_url, there is no limit to the processing length.
 
-- [Digital Ocean App Platform Installation Guide](docs/cloud-installation/do.md) - Deploy the API on Digital Ocean App Platform
+- [Digital Ocean App Platform Installation Guide](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/cloud-installation/do.md) - Deploy the API on Digital Ocean App Platform
 
 ### Google Cloud RUN Platform
 
@@ -355,7 +316,7 @@ However, when your processing times are consistant lower than 5 minutes (e.g. yo
 
 They also have a GPU option that might be usable for better performance (untested).
 
-- [Google Cloud RUN Platform (GCP) Installation Guide](docs/cloud-installation/gcp.md) - Deploy the API on Google Cloud Run
+- [Google Cloud RUN Platform (GCP) Installation Guide](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/cloud-installation/gcp.md) - Deploy the API on Google Cloud Run
 
 ### General Docker Instructions
 
@@ -363,13 +324,13 @@ You can use these instructions to deploy the NCA Toolkit to any linux server (on
 
 You can more easily control performance and cost this way, but requires more technical skill to get up and running (not much though).
 
-- [General Docker Compose Installation Guide](docker-compose.md)
+- [General Docker Compose Installation Guide](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docker-compose.md)
 
 ### Local Development with MinIO and n8n
 
 For local development with integrated S3-compatible storage and workflow automation:
 
-- [Local Development with MinIO and n8n Guide](docker-compose.local.minio.n8n.md) - Complete local development environment with MinIO storage and n8n workflow automation
+- [Local Development with MinIO and n8n Guide](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docker-compose.local.minio.n8n.md) - Complete local development environment with MinIO storage and n8n workflow automation
 
 ## Testing the API
 
@@ -390,7 +351,7 @@ We welcome contributions from the public! If you'd like to contribute to this pr
 1. Fork the repository
 2. Create a new branch for your feature or bug fix
 3. Make your changes
-4. Submit a pull request: to `main` for this fork, or to the "build" branch of [the original](https://github.com/stephengpope/no-code-architects-toolkit)
+4. Submit a pull request to the "build" branch
 
 ### Pull Request Process
 
