@@ -51,22 +51,71 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin 
 
 ---
 
-## 3. Get the Docker Compose File
+## 3. Create Docker Compose File
 
-Clone this repository and work from its folder:
+Create a `docker-compose.yml` file and paste the following configuration:
 
-```bash
-git clone https://github.com/hamchowderr/no-code-architects-toolkit.git
-cd no-code-architects-toolkit
+### With SSL Support
+Enables SSL/TLS for secure, encrypted communications. Ideal for those wanting a hands-off approach to SSL setup.
+
+```yaml
+services:
+  traefik:
+    image: "traefik"
+    restart: unless-stopped
+    command:
+      - "--api=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
+      - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
+      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - traefik_data:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+  ncat:
+    image: ghcr.io/hamchowderr/no-code-architects-toolkit:latest
+    env_file:
+      - .env
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ncat.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.ncat.tls=true
+      - traefik.http.routers.ncat.entrypoints=web,websecure
+      - traefik.http.routers.ncat.tls.certresolver=mytlschallenge
+    volumes:
+      - storage:/var/www/html/storage/app
+      - logs:/var/www/html/storage/logs
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    restart: unless-stopped
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+  traefik_data:
+    driver: local
+  storage:
+    driver: local
+  logs:
+    driver: local
 ```
-
-[`docker-compose.yml`](docker-compose.yml) starts three services:
-
-- **traefik** answers on ports 80 and 443 and gets a free HTTPS certificate for `APP_DOMAIN` from Let's Encrypt.
-- **ncat** is the toolkit, pulled ready-made from `ghcr.io/hamchowderr/no-code-architects-toolkit`. Nothing is compiled on your server. Set `NCAT_IMAGE` in `.env` to pin one commit (`ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>`).
-- **redis** holds the shared job queue, so jobs run side by side ([how it works](docs/toolkit/queue_and_transcription.md)).
-
-If your server already has a reverse proxy (Coolify, Caddy, nginx), leave traefik out and point the proxy at the toolkit's port 8080.
 
 ---
 
@@ -116,8 +165,11 @@ API_KEY=your_api_key_here
 # Requirement: Mandatory if using GCP storage.
 #GCP_BUCKET_NAME=your_gcp_bucket_name
 
-# Optional: pin the toolkit to one commit's image
-#NCAT_IMAGE=ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>
+# STORAGE_PATH
+# Purpose: The base path for storage operations.
+# Default: GCP
+# Requirement: Optional.
+#STORAGE_PATH=GCP
 
 ```
 
@@ -143,17 +195,13 @@ To stop the containers:
 docker compose stop
 ```
 
-To restart and reload env vars, update `.env`, then:
+To restart and reload env vars
+
+# First update your .env file with the correct values
+# Then run:
 
 ```bash
 docker compose up -d --force-recreate ncat
-```
-
-To update to a newer toolkit, move `NCAT_IMAGE` to the new commit (or keep `latest`), then:
-
-```bash
-docker compose pull ncat
-docker compose up -d ncat
 ```
 
 ---
