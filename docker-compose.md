@@ -53,64 +53,20 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin 
 
 ## 3. Get the Docker Compose File
 
-Clone this repository and work from its folder. The compose file builds the image from this repository's code:
+Clone this repository and work from its folder:
 
 ```bash
 git clone https://github.com/hamchowderr/no-code-architects-toolkit.git
 cd no-code-architects-toolkit
 ```
 
-The repository's `docker-compose.yml` holds the following configuration:
+[`docker-compose.yml`](docker-compose.yml) starts three services:
 
-### With SSL Support
-Enables SSL/TLS for secure, encrypted communications. Ideal for those wanting a hands-off approach to SSL setup.
+- **traefik** answers on ports 80 and 443 and gets a free HTTPS certificate for `APP_DOMAIN` from Let's Encrypt.
+- **ncat** is the toolkit, pulled ready-made from `ghcr.io/hamchowderr/no-code-architects-toolkit`. Nothing is compiled on your server. Set `NCAT_IMAGE` in `.env` to pin one commit (`ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>`).
+- **redis** holds the shared job queue, so jobs run side by side ([how it works](docs/toolkit/queue_and_transcription.md)).
 
-```yaml
-services:
-  traefik:
-    image: "traefik"
-    restart: unless-stopped
-    command:
-      - "--api=true"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
-      - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
-      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - traefik_data:/letsencrypt
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-  ncat:
-    build: .
-    env_file:
-      - .env
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.ncat.rule=Host(`${APP_DOMAIN}`)
-      - traefik.http.routers.ncat.tls=true
-      - traefik.http.routers.ncat.entrypoints=web,websecure
-      - traefik.http.routers.ncat.tls.certresolver=mytlschallenge
-    volumes:
-      - storage:/var/www/html/storage/app
-      - logs:/var/www/html/storage/logs
-    restart: unless-stopped
-
-volumes:
-  traefik_data:
-    driver: local
-  storage:
-    driver: local
-  logs:
-    driver: local
-```
+If your server already has a reverse proxy (Coolify, Caddy, nginx), leave traefik out and point the proxy at the toolkit's port 8080.
 
 ---
 
@@ -160,11 +116,8 @@ API_KEY=your_api_key_here
 # Requirement: Mandatory if using GCP storage.
 #GCP_BUCKET_NAME=your_gcp_bucket_name
 
-# STORAGE_PATH
-# Purpose: The base path for storage operations.
-# Default: GCP
-# Requirement: Optional.
-#STORAGE_PATH=GCP
+# Optional: pin the toolkit to one commit's image
+#NCAT_IMAGE=ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>
 
 ```
 
@@ -190,13 +143,17 @@ To stop the containers:
 docker compose stop
 ```
 
-To restart and reload env vars
-
-# First update your .env file with the correct values
-# Then run:
+To restart and reload env vars, update `.env`, then:
 
 ```bash
 docker compose up -d --force-recreate ncat
+```
+
+To update to a newer toolkit, move `NCAT_IMAGE` to the new commit (or keep `latest`), then:
+
+```bash
+docker compose pull ncat
+docker compose up -d ncat
 ```
 
 ---
