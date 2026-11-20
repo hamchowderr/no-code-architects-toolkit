@@ -1,0 +1,84 @@
+name: Toolkit image
+
+# Builds the toolkit's Docker image here on GitHub instead of on the shared server that
+# runs it. The image compiles FFmpeg and its video libraries from source, which takes
+# 20 to 40 minutes on the server and slows every other app there while it runs.
+# Pull requests only build the image and start it. Pushes to main also publish it to
+# GHCR, so the server only downloads a finished image:
+#   ghcr.io/hamchowderr/no-code-architects-toolkit:sha-<commit>  (pin this one)
+#   ghcr.io/hamchowderr/no-code-architects-toolkit:latest
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: toolkit-image-${{ github.ref }}
+  # Never cancel a publish half way; a newer push waits its turn.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    # The first build compiles FFmpeg from scratch; later ones reuse the layer cache.
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: nca-toolkit:check
+          cache-from: type=gha,scope=toolkit
+          cache-to: type=gha,scope=toolkit,mode=max
+      - name: Start it and wait for the API to answer
+        run: |
+          docker run -d --name toolkit -p 8080:8080 \
+            -e API_KEY=ci-check \
+            -e S3_ENDPOINT_URL=http://127.0.0.1:9 \
+            -e S3_ACCESS_KEY=unused -e S3_SECRET_KEY=unused \
+            -e S3_BUCKET_NAME=unused -e S3_REGION=auto \
+            nca-toolkit:check
+          # A 401 without a key means Gunicorn is up and routing requests.
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/toolkit/test || true)
+            if [ "$code" = "401" ]; then
+              echo "API answered ($code)"
+              docker exec toolkit ffmpeg -hide_banner -version | head -1
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs toolkit
+          exit 1
+      - name: Image size
+        run: docker image inspect nca-toolkit:check --format '{{.Size}}' | awk '{ printf "%.0f MB\n", $1 / 1000000 }'
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=toolkit
