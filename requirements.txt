@@ -17,7 +17,9 @@ psutil
 boto3
 Pillow
 matplotlib
-yt-dlp
+# curl-cffi lets yt-dlp look like a browser where a site asks for that (Dailymotion);
+# default brings yt-dlp-ejs, which solves YouTube's JavaScript puzzle with Node.
+yt-dlp[default,curl-cffi]
 jsonschema
 faster-whisper>=1.1,<2
 # faster-whisper 1.2 calls av.open(metadata_errors=...), which PyAV 16+ no longer accepts

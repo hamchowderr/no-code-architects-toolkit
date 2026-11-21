@@ -2,6 +2,7 @@ from flask import Blueprint
 from app_utils import *
 import logging
 import os
+import shutil
 import yt_dlp
 import tempfile
 from werkzeug.utils import secure_filename
@@ -15,6 +16,31 @@ import requests
 v1_media_download_bp = Blueprint('v1_media_download', __name__)
 logger = logging.getLogger(__name__)
 
+class NothingToDownload(Exception):
+    """The link was read, but it holds no video or sound, such as a post of photos."""
+
+
+def downloaded_file(expected, temp_dir):
+    """
+    The file yt-dlp wrote. Its name is usually the one it planned, but a format change can
+    alter the ending, and a post of photos writes nothing at all (its planned name then ends
+    in ".NA"), which is said plainly instead of failing on a missing file.
+    """
+    if os.path.isfile(expected):
+        return expected
+    written = [
+        os.path.join(temp_dir, name)
+        for name in os.listdir(temp_dir)
+        if os.path.isfile(os.path.join(temp_dir, name))
+        and not name.endswith((".part", ".ytdl", ".txt", ".json"))
+    ]
+    if not written:
+        raise NothingToDownload(
+            "There is no video or sound at this link to download. It may be a post of photos."
+        )
+    return max(written, key=os.path.getsize)
+
+
 @v1_media_download_bp.route('/v1/BETA/media/download', methods=['POST'])
 @authenticate
 @validate_payload({
@@ -25,6 +51,7 @@ logger = logging.getLogger(__name__)
         "id": {"type": "string"},
         "cookie": {"type": "string", "description": "Path to cookie file, URL to cookie file, or cookie string in Netscape format"},
         "cloud_upload": {"type": "boolean"},
+        "filename": {"type": "string", "description": "Where in the bucket to put the video (a key such as folder/name.mp4). Its name by default."},
         "format": {
             "type": "object",
             "properties": {
@@ -105,6 +132,11 @@ def download_media(job_id, data):
                 'no_warnings': True,
                 'download': data.get('cloud_upload', True)
             }
+            # YouTube now hands out its video links only after a small JavaScript puzzle.
+            # yt-dlp solves it with a JavaScript runtime; the image already has Node.
+            node = shutil.which('node')
+            if node:
+                ydl_opts['js_runtimes'] = {'node': {'path': node}}
 
             # Add cookies if provided
             if cookie:
@@ -178,9 +210,14 @@ def download_media(job_id, data):
                 if not data.get('cloud_upload', True):
                     media_url = info['url']
                 else:
-                    filename = ydl.prepare_filename(info)
+                    filename = downloaded_file(ydl.prepare_filename(info), temp_dir)
                     # Upload to cloud storage
-                    media_url = upload_file(filename)
+                    # Under the key asked for, keeping the ending of the file that was written.
+                    key = data.get('filename')
+                    if key:
+                        ending = os.path.splitext(filename)[1]
+                        key = os.path.splitext(key)[0] + ending if ending else key
+                    media_url = upload_file(filename, key=key) if key else upload_file(filename)
                     # Clean up the temporary file
                     os.remove(filename)
 
@@ -284,6 +321,9 @@ def download_media(job_id, data):
                 
                 return response, "/v1/media/download", 200
 
+    except NothingToDownload as e:
+        logger.info(f"Job {job_id}: {e}")
+        return str(e), "/v1/media/download", 400
     except Exception as e:
         logger.error(f"Job {job_id}: Error during download process - {str(e)}")
         return str(e), "/v1/media/download", 500 

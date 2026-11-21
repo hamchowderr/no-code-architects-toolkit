@@ -72,9 +72,9 @@ def build_public_url(endpoint_url, bucket_name, key):
         return f"{public_base.rstrip('/')}/{encoded_key}"
     return f"{endpoint_url.rstrip('/')}/{bucket_name}/{encoded_key}"
 
-def upload_to_s3(file_path, s3_url, access_key, secret_key, bucket_name, region):
+def upload_to_s3(file_path, s3_url, access_key, secret_key, bucket_name, region, key=None):
     client = get_s3_client(s3_url, access_key, secret_key, region)
-    key = os.path.basename(file_path)
+    key = key.lstrip('/') if key else os.path.basename(file_path)
     content_type = guess_content_type(key)
 
     try:

@@ -40,15 +40,15 @@ def parse_s3_url(s3_url):
 
 class CloudStorageProvider(ABC):
     @abstractmethod
-    def upload_file(self, file_path: str) -> str:
+    def upload_file(self, file_path: str, key: str = None) -> str:
         pass
 
 class GCPStorageProvider(CloudStorageProvider):
     def __init__(self):
         self.bucket_name = os.getenv('GCP_BUCKET_NAME')
 
-    def upload_file(self, file_path: str) -> str:
-        return upload_to_gcs(file_path, self.bucket_name)
+    def upload_file(self, file_path: str, key: str = None) -> str:
+        return upload_to_gcs(file_path, self.bucket_name, key=key)
 
 class S3CompatibleProvider(CloudStorageProvider):
     def __init__(self):
@@ -83,8 +83,8 @@ class S3CompatibleProvider(CloudStorageProvider):
             except Exception as e:
                 logger.warning(f"Failed to parse Digital Ocean URL: {e}. Using provided values.")
 
-    def upload_file(self, file_path: str) -> str:
-        return upload_to_s3(file_path, self.endpoint_url, self.access_key, self.secret_key, self.bucket_name, self.region)
+    def upload_file(self, file_path: str, key: str = None) -> str:
+        return upload_to_s3(file_path, self.endpoint_url, self.access_key, self.secret_key, self.bucket_name, self.region, key=key)
 
 def get_storage_provider() -> CloudStorageProvider:
     
@@ -105,11 +105,12 @@ def get_storage_provider() -> CloudStorageProvider:
     
     raise ValueError(f"No cloud storage settings provided.")
 
-def upload_file(file_path: str) -> str:
+def upload_file(file_path: str, key: str = None) -> str:
+    """Puts a file in the bucket, under its own name or under key (a path such as a folder/name)."""
     provider = get_storage_provider()
     try:
         logger.info(f"Uploading file to cloud storage: {file_path}")
-        url = provider.upload_file(file_path)
+        url = provider.upload_file(file_path, key=key) if key else provider.upload_file(file_path)
         logger.info(f"File uploaded successfully: {url}")
         return url
     except Exception as e:

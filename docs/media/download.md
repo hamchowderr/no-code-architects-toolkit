@@ -32,6 +32,7 @@ The `/v1/BETA/media/download` endpoint provides a powerful interface for downloa
 | `id` | string | Custom identifier for tracking the request |
 | `cookie` | string | Path to cookie file, URL to cookie file, or cookie string in Netscape format |
 | `cloud_upload` | boolean | When true (default), the downloaded media will be uploaded to cloud storage and a cloud URL will be returned. When false, the direct download URL of the media will be returned instead. |
+| `filename` | string | Where in the bucket to put the video, as a key such as `team/uploads/talk.mp4`. The ending is set to that of the file actually downloaded. Default: the video's own name at the top of the bucket. |
 
 #### Format Options (Optional)
 
@@ -317,6 +318,9 @@ The endpoint handles various error scenarios:
 4. **Format Availability**: Not all requested formats may be available for all media sources
 5. **Webhook Failures**: If the webhook URL is unreachable, you won't receive the final result
 6. **Queue Overflow**: Requests may be rejected if the processing queue is full
+7. **Sign-in walls**: tested 2026-11-21 from a server, TikTok, public Instagram reels, Facebook, X, LinkedIn and plain video links download as they are. YouTube (it asks a server to prove it is not a bot), Vimeo, Reddit and Instagram posts that need an account only download with `cookie`: the cookies of a signed-in account, exported in Netscape format.
+8. **No video at the link**: a post of photos, or a page with no video, answers 400 with "There is no video or sound at this link to download" instead of an error about a missing file.
+9. **YouTube's JavaScript check**: yt-dlp solves it with Node, which the image already has (the `yt-dlp[default]` extra brings the solver). `curl-cffi` lets yt-dlp look like a browser for sites that ask for that, such as Dailymotion.
 
 ## Best Practices
 
