@@ -317,6 +317,9 @@ The endpoint handles various error scenarios:
 4. **Format Availability**: Not all requested formats may be available for all media sources
 5. **Webhook Failures**: If the webhook URL is unreachable, you won't receive the final result
 6. **Queue Overflow**: Requests may be rejected if the processing queue is full
+7. **Sign-in walls**: tested 2026-11-21 from a server, TikTok, public Instagram reels, Facebook, X, LinkedIn and plain video links download as they are. YouTube (it asks a server to prove it is not a bot), Vimeo, Reddit and Instagram posts that need an account only download with `cookie`: the cookies of a signed-in account, exported in Netscape format.
+8. **No video at the link**: a post of photos, or a page with no video, answers 400 with "There is no video or sound at this link to download" instead of an error about a missing file.
+9. **YouTube's JavaScript check**: yt-dlp solves it with Node, which the image already has (the `yt-dlp[default]` extra brings the solver). `curl-cffi` lets yt-dlp look like a browser for sites that ask for that, such as Dailymotion.
 
 ## Best Practices
 
