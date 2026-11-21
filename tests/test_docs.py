@@ -67,6 +67,7 @@ def test_readme_lists_every_fork_endpoint():
     for endpoint in [
         "/v1/toolkit/health",
         "/v1/media/look",
+        "/v1/media/check",
         "/v1/video/reframe",
         "/v1/video/motion",
         "/v1/storage/",
