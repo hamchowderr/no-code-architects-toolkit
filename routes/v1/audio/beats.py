@@ -39,7 +39,7 @@ ENDPOINT = "/v1/audio/beats"
     "properties": {
         "media_url": {"type": "string", "format": "uri"},
         "max_seconds": {"type": "number", "minimum": 1, "maximum": 3600},
-        "beats_per_bar": {"type": "integer", "enum": [3, 4]},
+        "beats_per_bar": {"type": "integer", "minimum": 3, "maximum": 4},
         "min_bpm": {"type": "number", "minimum": 30, "maximum": 300},
         "max_bpm": {"type": "number", "minimum": 30, "maximum": 300},
         "webhook_url": {"type": "string", "format": "uri"},
