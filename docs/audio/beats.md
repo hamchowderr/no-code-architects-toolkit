@@ -8,7 +8,7 @@
 4. Beats are placed by dynamic programming (Ellis, 2007): each lands on a strong onset while the gaps stay close to the tempo.
 5. Bars start on the beat in each group of four (or three) where the bass hits hardest.
 
-A three-minute song takes about a second. Works on any file with sound: a song, or a video whose sound is music.
+A three-minute MP3 takes under a second. Works on any file with sound: a song, or a video whose sound is music.
 
 ## Request
 
@@ -41,7 +41,7 @@ A three-minute song takes about a second. Works on any file with sound: a song, 
 
 - `duration` is how much was read, in seconds.
 - `tempo` is beats a minute over the whole song, and `beat_seconds` the length of one beat.
-- `steadiness` is how evenly the sound repeats at that tempo, 0 to 1. Music with a clear beat is usually above 0.5; speech or a free-time piece is below 0.3, and its beats are best not cut on.
+- `steadiness` is how evenly the sound repeats at that tempo, 0 to 1. Songs with a beat measured 0.3 to 0.6 (drum loops up to 0.9); speech measured below 0.3, and its "beats" are best not cut on.
 - `beats` holds every beat in seconds, in order, and `strengths` how hard each one hits, 0 to 1 (1 is the hardest in the song).
 - `downbeats` holds the first beat of each bar.
 - Silence gives `tempo: null` and no beats. A file with no sound at all is answered with 400.
