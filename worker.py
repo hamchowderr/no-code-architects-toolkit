@@ -31,11 +31,22 @@ import os
 import signal
 import sys
 import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s worker %(process)d %(levelname)s %(message)s")
 logger = logging.getLogger("ncat.worker")
+
+
+def worker_name(index):
+    """
+    A name no earlier worker had. A restarted container has the same host name and hands
+    out the same process ids, so a name made of those alone matched a worker from before
+    the restart: its jobs looked held by a live worker and were never failed (they stayed
+    "running" for good). The random part keeps names apart across restarts.
+    """
+    return f"ncat-{os.uname().nodename}-{os.getpid()}-{index}-{uuid.uuid4().hex[:8]}"
 
 
 def run_one_worker(index):
@@ -49,7 +60,7 @@ def run_one_worker(index):
     worker = SimpleWorker(
         [job_queue.get_queue()],
         connection=job_queue.get_connection(),
-        name=f"ncat-{os.uname().nodename}-{os.getpid()}-{index}",
+        name=worker_name(index),
     )
     logger.info(f"Worker {index} listening on queue '{job_queue.queue_name()}'")
     worker.work(with_scheduler=False)
