@@ -35,9 +35,9 @@ def uploaded(monkeypatch):
 
     kept = []
 
-    def keep(path):
+    def keep(path, key=None):
         kept.append(os.path.getsize(path))
-        return f"https://bucket.example/{os.path.basename(path)}"
+        return f"https://bucket.example/{key or os.path.basename(path)}"
 
     monkeypatch.setattr(route, "upload_file", keep)
     return kept
@@ -63,6 +63,17 @@ def test_a_video_link_is_downloaded_and_put_in_the_bucket(client, site, uploaded
     media = res.get_json()["response"]["media"]
     assert media["media_url"] == "https://bucket.example/talk.mp4"
     assert uploaded == [os.path.getsize(os.path.join(DATA, "reframe_speaker.mp4"))]
+
+
+def test_a_video_can_be_put_under_a_key_of_its_own(client, site, uploaded):
+    res = client.post(
+        "/v1/BETA/media/download",
+        json={"media_url": f"{site}/talk.mp4", "filename": "team-a/uploads/1/talk.mkv"},
+        headers={"X-API-Key": API_KEY},
+    )
+    assert res.status_code == 200, res.get_json()
+    # The key keeps the ending of the file that was actually written.
+    assert res.get_json()["response"]["media"]["media_url"] == "https://bucket.example/team-a/uploads/1/talk.mp4"
 
 
 def test_a_cookie_text_is_handed_to_yt_dlp_as_a_file(client, site, uploaded, monkeypatch):

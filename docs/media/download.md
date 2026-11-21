@@ -32,6 +32,7 @@ The `/v1/BETA/media/download` endpoint provides a powerful interface for downloa
 | `id` | string | Custom identifier for tracking the request |
 | `cookie` | string | Path to cookie file, URL to cookie file, or cookie string in Netscape format |
 | `cloud_upload` | boolean | When true (default), the downloaded media will be uploaded to cloud storage and a cloud URL will be returned. When false, the direct download URL of the media will be returned instead. |
+| `filename` | string | Where in the bucket to put the video, as a key such as `team/uploads/talk.mp4`. The ending is set to that of the file actually downloaded. Default: the video's own name at the top of the bucket. |
 
 #### Format Options (Optional)
 

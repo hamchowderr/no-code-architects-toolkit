@@ -51,6 +51,7 @@ def downloaded_file(expected, temp_dir):
         "id": {"type": "string"},
         "cookie": {"type": "string", "description": "Path to cookie file, URL to cookie file, or cookie string in Netscape format"},
         "cloud_upload": {"type": "boolean"},
+        "filename": {"type": "string", "description": "Where in the bucket to put the video (a key such as folder/name.mp4). Its name by default."},
         "format": {
             "type": "object",
             "properties": {
@@ -211,7 +212,12 @@ def download_media(job_id, data):
                 else:
                     filename = downloaded_file(ydl.prepare_filename(info), temp_dir)
                     # Upload to cloud storage
-                    media_url = upload_file(filename)
+                    # Under the key asked for, keeping the ending of the file that was written.
+                    key = data.get('filename')
+                    if key:
+                        ending = os.path.splitext(filename)[1]
+                        key = os.path.splitext(key)[0] + ending if ending else key
+                    media_url = upload_file(filename, key=key) if key else upload_file(filename)
                     # Clean up the temporary file
                     os.remove(filename)
 
