@@ -83,6 +83,9 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **[`/v1/media/metadata`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/media/metadata.md)**
   - Extracts comprehensive metadata from media files including format, codecs, resolution, and bitrates.
 
+- **[`/v1/media/check`](docs/media/check.md)**
+  - Measures footage before editing with FFmpeg alone: its shape as it plays, frame rate, length, loudness and clipping, and black or frozen stretches.
+
 - **[`/v1/media/look`](docs/media/look.md)**
   - Describes frames, pictures and words as CLIP vectors so they can be matched to each other, and finds a video's camera cuts.
 
