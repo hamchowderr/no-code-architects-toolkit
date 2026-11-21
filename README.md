@@ -42,6 +42,9 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **[`/v1/audio/concatenate`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/audio/concatenate.md)**
   - Combines multiple audio files into a single audio file.
 
+- **[`/v1/audio/beats`](docs/audio/beats.md)**
+  - Finds a song's tempo, every beat and where bars start, with plain signal processing (no AI), so an edit can cut on the beat.
+
 ### Code
 
 - **[`/v1/code/execute/python`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/code/execute/execute_python.md)**
