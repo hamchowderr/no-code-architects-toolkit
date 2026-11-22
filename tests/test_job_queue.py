@@ -265,3 +265,29 @@ def test_a_running_job_that_never_went_through_the_queue_is_left_alone(flask_app
     job_queue.save_status("job-in-request", {"job_status": "running", "job_id": "job-in-request"})
     assert job_queue.fail_abandoned_jobs() == []
     assert job_queue.load_status("job-in-request")["job_status"] == "running"
+
+
+def test_a_worker_after_a_restart_never_takes_an_earlier_workers_name(monkeypatch):
+    # A restarted container keeps its host name and hands out the same process ids. The
+    # speed test found jobs left "running" for hours because the new worker 11 had the same
+    # name as the old one, so the old worker looked alive.
+    import worker
+
+    monkeypatch.setattr(worker.os, "getpid", lambda: 11)
+    first, second = worker.worker_name(1), worker.worker_name(1)
+    assert first != second
+    assert first.startswith(f"ncat-{worker.os.uname().nodename}-11-1-")
+
+
+def test_a_job_left_by_the_same_numbered_worker_before_a_restart_is_failed(flask_app, fake_redis, webhook_sink):
+    import worker
+    from rq import Worker
+
+    # The worker that took the job is gone; the one now running has the same pid and index.
+    old = "ncat-box-11-1"
+    fake_redis.set(Worker.redis_worker_namespace_prefix + worker.worker_name(1), "alive")
+    job_id = _left_running(fake_redis, webhook_sink.url, old)
+
+    assert job_queue.fail_abandoned_jobs() == [job_id]
+    [hook] = webhook_sink.wait_for(1)
+    assert hook["body"]["message"] == job_queue.ABANDONED_MESSAGE
