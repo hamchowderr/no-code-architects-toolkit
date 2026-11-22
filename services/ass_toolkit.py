@@ -75,6 +75,38 @@ def generate_transcription(video_path, language='auto'):
         logger.error(f"Error in transcription: {str(e)}")
         raise
 
+def transcription_from_segments(segments):
+    """
+    A transcript someone already made, in the shape generate_transcription returns, so the
+    video is not transcribed again. Each segment has start, end and its words (word, start,
+    end); Whisper starts every word with a space, so a word given without one gets one and
+    the captions come out the same as from a fresh transcription.
+    """
+    result = []
+    for segment in segments or []:
+        words = []
+        for w in segment.get('words') or []:
+            text = str(w.get('word', ''))
+            if not text.strip():
+                continue
+            start = float(w['start'])
+            end = max(float(w['end']), start)
+            words.append({'word': text if text[:1].isspace() else f" {text}", 'start': start, 'end': end})
+        text = segment.get('text')
+        if not isinstance(text, str) or not text.strip():
+            text = ''.join(w['word'] for w in words)
+        elif not text[:1].isspace():
+            text = f" {text}"
+        start = float(segment['start'])
+        result.append({
+            'start': start,
+            'end': max(float(segment['end']), start),
+            'text': text,
+            'words': words,
+        })
+    result.sort(key=lambda s: s['start'])
+    return {'text': ''.join(s['text'] for s in result), 'segments': result}
+
 def get_video_resolution(video_path):
     try:
         probe = ffmpeg.probe(video_path)
@@ -734,7 +766,7 @@ def normalize_exclude_time_ranges(exclude_time_ranges):
         norm.append({"start": start, "end": end})
     return norm
 
-def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_time_ranges, job_id, language='auto', PlayResX=None, PlayResY=None):
+def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_time_ranges, job_id, language='auto', PlayResX=None, PlayResY=None, segments=None):
     """
     Captioning process with transcription fallback and multiple styles.
     Integrates with the updated logic for positioning and alignment.
@@ -793,14 +825,20 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
         else:
             captions_content = None
 
-        # Download the video
-        try:
-            video_path = download_file(video_url, LOCAL_STORAGE_PATH)
-            logger.info(f"Job {job_id}: Video downloaded to {video_path}")
-        except Exception as e:
-            logger.error(f"Job {job_id}: Video download error: {str(e)}")
-            # For non-font errors, do NOT include available_fonts
-            return {"error": str(e)}
+        # Download the video. With a transcript given and the canvas size known, nothing is
+        # read from the video, so it is not downloaded at all.
+        needs_video = not (segments is not None and not captions_content and PlayResX is not None and PlayResY is not None)
+        video_path = None
+        if needs_video:
+            try:
+                video_path = download_file(video_url, LOCAL_STORAGE_PATH)
+                logger.info(f"Job {job_id}: Video downloaded to {video_path}")
+            except Exception as e:
+                logger.error(f"Job {job_id}: Video download error: {str(e)}")
+                # For non-font errors, do NOT include available_fonts
+                return {"error": str(e)}
+        else:
+            logger.info(f"Job {job_id}: Transcript and canvas size given; the video is not downloaded.")
 
         # Get video resolution, unless provided
         if PlayResX is not None and PlayResY is not None:
@@ -834,6 +872,12 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
                 # Generate ASS based on chosen style
                 subtitle_content = process_subtitle_events(transcription_result, style_type, style_options, replace_dict, video_resolution)
                 subtitle_type = 'ass'
+        elif segments is not None:
+            # A transcript with word times came with the request: no need to hear it again.
+            logger.info(f"Job {job_id}: Using the {len(segments)} transcript segments given.")
+            transcription_result = transcription_from_segments(segments)
+            subtitle_content = process_subtitle_events(transcription_result, style_type, style_options, replace_dict, video_resolution)
+            subtitle_type = 'ass'
         else:
             # No captions provided, generate transcription
             logger.info(f"Job {job_id}: No captions provided, generating transcription.")

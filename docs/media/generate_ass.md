@@ -29,6 +29,7 @@ The request body must be a JSON object with the following properties:
   - `start`: (string, required) The start time of the excluded range, as a string timecode in `hh:mm:ss.ms` format (e.g., `00:01:23.456`).
   - `end`: (string, required) The end time, as a string timecode in `hh:mm:ss.ms` format, which must be strictly greater than `start`.
 - `language` (string, optional): The language code for the subtitles (e.g., "en", "fr"). Defaults to "auto".
+- `segments` (array, optional): A transcript with word times that was already made, so the media is not transcribed again. Each item is one stretch of speech, about a sentence: `start` and `end` in seconds, an optional `text`, and `words`, each with `word`, `start` and `end` in seconds. Words may come with or without the leading space Whisper gives them; the captions come out the same as from a fresh transcription. With `segments`, `canvas_width` and `canvas_height` all given, the media is not downloaded at all. `language` is not used with `segments`.
 - `webhook_url` (string, optional): A URL to receive a webhook notification when the subtitle generation process is complete.
 - `id` (string, optional): An identifier for the request.
 
