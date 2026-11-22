@@ -21,6 +21,8 @@ The docker-compose files start a `redis` service and set `REDIS_URL` for you.
 | `QUEUE_JOB_TIMEOUT` | `14400` | Seconds before a job is stopped. |
 | `JOB_STATUS_TTL` | `604800` | Seconds job status is kept in Redis. |
 | `MAX_QUEUE_LENGTH` | `0` | Now counts the shared queue, so the limit holds across all workers. |
+| `WEBHOOK_TIMEOUT` | `30` | Seconds to wait for a `webhook_url` to connect and answer, so a receiver that never answers cannot hold a worker. |
+| `WEBHOOK_RETRIES` | `3` | Extra tries, with backoff, when a webhook cannot connect or answers 429, 502, 503 or 504. A slow answer is not tried again, so a result is not posted twice. |
 
 More capacity: run more workers on other machines with the same image, the same
 environment (storage keys, `API_KEY`, `REDIS_URL`) and the command `python worker.py`.
