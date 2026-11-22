@@ -332,6 +332,7 @@ Additionally, the main application context (`app.py`) includes error handling fo
   - `position` can be used to place captions in one of nine positions on the screen
   - `alignment` determines text alignment within the position (left, center, right)
   - `font_family` can be any available system font
+    - The image has Noto fonts for most scripts, named by script: `Noto Sans Devanagari`, `Noto Sans Thai`, `Noto Sans Bengali`, `Noto Sans Hebrew`, `Noto Sans CJK KR`, `Noto Sans CJK JP`, `Noto Sans CJK SC` and so on. A font missing a letter falls back to one that has it.
   - Color options can be set using hex codes (e.g., "#FFFFFF" for white)
 - The `replace` parameter can be used to perform text replacements in the captions (useful for correcting words or censoring content).
 - The `webhook_url` parameter is optional and can be used to receive a notification when the captioning process is complete.
