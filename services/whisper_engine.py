@@ -26,9 +26,11 @@ API response keeps its shape.
 Settings (environment variables):
   WHISPER_MODEL         Model size or path. Default "base" (what the toolkit always used).
   WHISPER_DEVICE        "auto" (default: GPU when CUDA is present, else CPU), "cpu" or "cuda".
-  WHISPER_COMPUTE_TYPE  Default "int8" on CPU and "float16" on GPU.
-  WHISPER_CPU_THREADS   Threads per transcription. Default: the container's CPUs divided by
-                        QUEUE_WORKERS when the Redis queue is on, else all of them.
+  WHISPER_COMPUTE_TYPE  Default "float16" on GPU. On CPU, "int8" when the processor has the
+                        VNNI instructions that make int8 fast (recent Intel), else "float32",
+                        which is quicker there (AMD EPYC 7543P: 15.6 s against 21.2 s).
+  WHISPER_CPU_THREADS   Threads per transcription. Default: half the container's CPUs, at
+                        least 1 and at most 4. More threads made it slower, not faster.
   WHISPER_BEAM_SIZE     Default 1 (greedy, the decoding openai-whisper used). 5 is a little
                         more accurate and about twice as slow.
   WHISPER_VAD_FILTER    "true" skips long silences before decoding. Default off.
@@ -72,8 +74,40 @@ def resolve_settings(model_size=None):
     device = (os.environ.get("WHISPER_DEVICE") or "auto").lower()
     if device == "auto":
         device = "cuda" if _cuda_available() else "cpu"
-    compute_type = os.environ.get("WHISPER_COMPUTE_TYPE") or ("float16" if device == "cuda" else "int8")
+    compute_type = os.environ.get("WHISPER_COMPUTE_TYPE") or (
+        "float16" if device == "cuda" else cpu_compute_type()
+    )
     return size, device, compute_type
+
+
+# Instructions that make CTranslate2's int8 path fast. Without them (AMD Zen 3 and older,
+# older Intel) int8 is slower than float32.
+_FAST_INT8_FLAGS = {"avx512_vnni", "avx_vnni", "amx_int8"}
+
+
+def _cpu_flags():
+    """The processor's feature flags from /proc/cpuinfo, or None where it can't be read."""
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("flags"):
+                    return set(line.split(":", 1)[1].split())
+    except OSError:
+        return None
+    return None
+
+
+def cpu_compute_type(flags=None):
+    """
+    int8 where the processor runs it fast, float32 where it doesn't. Measured on the
+    shared toolkit's AMD EPYC 7543P (no VNNI), 81 s of speech with word timings, base
+    model: int8 21.2 s and float32 15.6 s on one thread, 10.5 s and 6.6 s on three.
+    Where the flags can't be read (not Linux) it stays int8, as before.
+    """
+    flags = _cpu_flags() if flags is None else flags
+    if flags is None or flags & _FAST_INT8_FLAGS:
+        return "int8"
+    return "float32"
 
 
 def get_model(model_size=None):
@@ -127,20 +161,20 @@ def _listdir(path):
 
 def cpu_threads():
     """
-    WHISPER_CPU_THREADS, or the container's CPUs shared among the jobs that can run at
-    once (QUEUE_WORKERS with the Redis queue), so parallel jobs do not fight for cores.
+    WHISPER_CPU_THREADS, or half the container's CPUs, at least 1 and at most 4.
+
+    It used to be the CPUs divided by QUEUE_WORKERS, which is one thread on a 6 CPU
+    toolkit with 4 workers: a lone transcription then used one core of six. On the AMD
+    EPYC toolkit (float32, 81 s of speech) one thread took 15.6 s, three 6.6 s, four
+    5.6 s, while int8 on six threads took 27.5 s, slower than on one. Half the CPUs is
+    near the fastest for one job and leaves room when several run at once.
     """
     raw = os.environ.get("WHISPER_CPU_THREADS")
     if raw not in (None, ""):
         return int(raw)
     from services.cpu_limits import available_cpus
 
-    cpus = available_cpus()
-    if os.environ.get("REDIS_URL"):
-        from services import job_queue
-
-        return max(1, cpus // max(1, job_queue.worker_count()))
-    return cpus
+    return max(1, min(4, available_cpus() // 2))
 
 
 def _word_dict(word):

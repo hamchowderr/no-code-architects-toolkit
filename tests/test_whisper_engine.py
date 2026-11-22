@@ -90,12 +90,33 @@ def test_model_loads_once_per_process(fake_model):
     assert fake_model.instances == 1
 
 
-def test_defaults_to_base_int8_on_cpu(fake_model):
+def test_defaults_to_base_int8_on_cpu(fake_model, monkeypatch):
+    monkeypatch.setattr(whisper_engine, "_cpu_flags", lambda: {"avx2", "avx512_vnni"})
     whisper_engine.transcribe("a.mp3")
     model = next(iter(whisper_engine._models.values()))
     assert model.size == "base"
     assert model.kwargs["device"] == "cpu"
     assert model.kwargs["compute_type"] == "int8"
+
+
+def test_float32_on_a_processor_without_fast_int8(fake_model, monkeypatch):
+    # The shared toolkit's AMD EPYC 7543P has AVX2 but no VNNI.
+    monkeypatch.setattr(whisper_engine, "_cpu_flags", lambda: {"avx", "avx2", "fma"})
+    whisper_engine.transcribe("a.mp3")
+    model = next(iter(whisper_engine._models.values()))
+    assert model.kwargs["compute_type"] == "float32"
+
+
+def test_int8_where_the_processor_is_unknown():
+    assert whisper_engine.cpu_compute_type(flags=None) in ("int8", "float32")
+    assert whisper_engine.cpu_compute_type(flags=set()) == "float32"
+    assert whisper_engine.cpu_compute_type(flags={"avx_vnni"}) == "int8"
+    assert whisper_engine.cpu_compute_type(flags={"amx_int8"}) == "int8"
+
+
+def test_flags_unreadable_keeps_int8(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "_cpu_flags", lambda: None)
+    assert whisper_engine.cpu_compute_type() == "int8"
 
 
 def test_gpu_uses_float16(fake_model, monkeypatch):

@@ -34,18 +34,18 @@ def test_available_cpus_takes_the_smallest(monkeypatch):
     assert cpu_limits.available_cpus() == 2
 
 
-def test_whisper_threads_shared_among_queue_workers(monkeypatch):
-    monkeypatch.setattr(cpu_limits, "available_cpus", lambda: 4)
+def test_whisper_threads_are_half_the_cpus_up_to_four(monkeypatch):
     monkeypatch.delenv("WHISPER_CPU_THREADS", raising=False)
-    monkeypatch.delenv("REDIS_URL", raising=False)
-    assert whisper_engine.cpu_threads() == 4
+    for cpus, threads in ((1, 1), (2, 1), (4, 2), (6, 3), (8, 4), (32, 4)):
+        monkeypatch.setattr(cpu_limits, "available_cpus", lambda cpus=cpus: cpus)
+        assert whisper_engine.cpu_threads() == threads
+    # The queue's worker count no longer divides it down to one thread a job.
+    monkeypatch.setattr(cpu_limits, "available_cpus", lambda: 6)
     monkeypatch.setenv("REDIS_URL", "redis://x:6379/0")
-    monkeypatch.setenv("QUEUE_WORKERS", "2")
-    assert whisper_engine.cpu_threads() == 2
-    monkeypatch.setenv("QUEUE_WORKERS", "8")
-    assert whisper_engine.cpu_threads() == 1
-    monkeypatch.setenv("WHISPER_CPU_THREADS", "3")
+    monkeypatch.setenv("QUEUE_WORKERS", "4")
     assert whisper_engine.cpu_threads() == 3
+    monkeypatch.setenv("WHISPER_CPU_THREADS", "5")
+    assert whisper_engine.cpu_threads() == 5
 
 
 def test_model_cache_falls_back_when_not_writable(monkeypatch, tmp_path):

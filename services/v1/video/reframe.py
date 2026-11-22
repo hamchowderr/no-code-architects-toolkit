@@ -282,6 +282,23 @@ def score_track(track, audio):
     return result
 
 
+def _shares_screen(track, done, open_tracks):
+    """
+    Whether another face is on screen at any time this one is. Only then does it matter
+    who is talking: a face that is alone whenever it shows is the one the camera is on
+    either way, so scoring it (about a third of the analysis time) is skipped.
+
+    This is complete when the track finishes: a finished face that overlapped it was
+    still open when that one finished, so it was scored then, and any face still open
+    that started before this one ended overlaps it (counted even if it later turns out
+    not to, which only means scoring more than needed).
+    """
+    for other in done:
+        if other is not track and other.first <= track.last and other.last >= track.first:
+            return True
+    return any(other is not track and other.first <= track.last for other in open_tracks)
+
+
 def analyse(path, info, follow, has_audio):
     """Find faces, follow them and (for follow=speaker) score who is talking.
 
@@ -315,7 +332,7 @@ def analyse(path, info, follow, has_audio):
 
     def finish(track):
         if len(track.frames) >= MIN_TRACK:
-            if want_crops:
+            if want_crops and _shares_screen(track, done, open_tracks):
                 track.scores = score_track(track, audio)
             track.crops = []
             done.append(track)
