@@ -248,6 +248,15 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **Default**: /tmp
 - **Recommendation**: Set to a path with sufficient disk space for your expected workloads.
 
+---
+
+### Security
+
+#### `BLOCK_PRIVATE_URLS`
+- **Purpose**: Refuse to download files from private or internal addresses (localhost, 10.x, 192.168.x, cloud metadata, other containers on the same server), including after a redirect.
+- **Default**: false, so a local setup can still read from MinIO or another container.
+- **Recommendation**: Set to `true` on any toolkit that other people send links to, such as one shared by several teams.
+
 ### Notes
 - Ensure all required environment variables are set based on the storage provider in use (GCP or S3-compatible). 
 - Missing any required variables will result in errors during runtime.

@@ -21,11 +21,25 @@ import logging
 from flask import Blueprint, request, jsonify
 from app_utils import *
 from services.v1.ffmpeg.ffmpeg_compose import process_ffmpeg_compose
+from services.v1.ffmpeg.compose_guard import compose_problem
+from functools import wraps
 from services.authentication import authenticate
 from services.cloud_storage import upload_file
 
 v1_ffmpeg_compose_bp = Blueprint('v1_ffmpeg_compose', __name__)
 logger = logging.getLogger(__name__)
+
+
+def refuse_file_access(func):
+    """Refuse, before queueing, a request that would make FFmpeg read or write a file here."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        problem = compose_problem(request.get_json(silent=True) or {})
+        if problem:
+            return jsonify({"message": problem}), 400
+        return func(*args, **kwargs)
+    return wrapper
+
 
 @v1_ffmpeg_compose_bp.route('/v1/ffmpeg/compose', methods=['POST'])
 @authenticate
@@ -112,6 +126,7 @@ logger = logging.getLogger(__name__)
     "required": ["inputs", "outputs"],
     "additionalProperties": False
 })
+@refuse_file_access
 @queue_task_wrapper(bypass_queue=False)
 def ffmpeg_api(job_id, data):
     logger.info(f"Job {job_id}: Received flexible FFmpeg request")
