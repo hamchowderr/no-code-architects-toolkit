@@ -35,6 +35,7 @@ A three-minute MP3 takes under a second. Works on any file with sound: a song, o
   "beats_per_bar": 4,
   "beats": [0.232, 0.731, 1.232, 1.731],
   "strengths": [0.91, 0.42, 0.55, 0.40],
+  "loudness": [-0.4, -1.2, -0.9, 0.0],
   "downbeats": [0.232, 2.231]
 }
 ```
@@ -42,6 +43,6 @@ A three-minute MP3 takes under a second. Works on any file with sound: a song, o
 - `duration` is how much was read, in seconds.
 - `tempo` is beats a minute over the whole song, and `beat_seconds` the length of one beat.
 - `steadiness` is how evenly the sound repeats at that tempo, 0 to 1. Songs with a beat measured 0.3 to 0.6 (drum loops up to 0.9); speech measured below 0.3, and its "beats" are best not cut on.
-- `beats` holds every beat in seconds, in order, and `strengths` how hard each one hits, 0 to 1 (1 is the hardest in the song).
+- `beats` holds every beat in seconds, in order, and `strengths` how hard each one hits, 0 to 1 (1 is the hardest in the song). `loudness` is how loud each beat is, from it to the next, in dB below the song's loudest beat (0 is the loudest, never below -60), so an edit can cut faster where the music gets louder.
 - `downbeats` holds the first beat of each bar.
 - Silence gives `tempo: null` and no beats. A file with no sound at all is answered with 400.

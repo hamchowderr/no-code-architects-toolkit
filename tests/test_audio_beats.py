@@ -95,6 +95,24 @@ def test_finds_the_tempo_and_every_beat(songs, bpm):
     assert all(0 <= s <= 1 for s in found["strengths"])
 
 
+def test_says_how_loud_each_beat_is(tmp_path):
+    # The second half of the song is 12 dB louder: each beat of the first half reads about
+    # 12 dB below the same beat of the bar ten seconds (20 beats) later.
+    samples, truth = drum_track(120)
+    half = samples.size // 2
+    samples[:half] *= 10 ** (-12 / 20)
+    write_wav(tmp_path / "builds.wav", samples * 0.8)
+    found = bt.find_beats(str(tmp_path / "builds.wav"))
+    loud = np.array(found["loudness"])
+    beats = np.array(found["beats"])
+    assert loud.size == beats.size
+    assert loud.max() == 0 and loud.min() >= -60
+    early = np.flatnonzero(beats < 9.5)
+    assert abs(np.median(loud[early] - loud[early + 20]) + 12) < 1.5
+    # The loudest beats are the kicks of the loud half.
+    assert beats[np.argmax(loud)] > 10
+
+
 @pytest.mark.parametrize("bpm", [95, 120, 140])
 def test_bars_start_on_the_kick(songs, bpm):
     path, truth = songs[bpm]
