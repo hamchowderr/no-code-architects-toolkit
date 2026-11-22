@@ -81,6 +81,34 @@ logger = logging.getLogger(__name__)
             }
         },
         "language": {"type": "string"},
+        "segments": {
+            "type": "array",
+            "maxItems": 20000,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "number", "minimum": 0},
+                    "end": {"type": "number", "minimum": 0},
+                    "text": {"type": "string"},
+                    "words": {
+                        "type": "array",
+                        "maxItems": 2000,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "word": {"type": "string"},
+                                "start": {"type": "number", "minimum": 0},
+                                "end": {"type": "number", "minimum": 0}
+                            },
+                            "required": ["word", "start", "end"],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                "required": ["start", "end", "words"],
+                "additionalProperties": False
+            }
+        },
         "webhook_url": {"type": "string", "format": "uri"},
         "id": {"type": "string"}
     },
@@ -104,6 +132,7 @@ def generate_ass_v1(job_id, data):
     language = data.get('language', 'auto')
     canvas_width = data.get('canvas_width')
     canvas_height = data.get('canvas_height')
+    segments = data.get('segments')
 
     logger.info(f"Job {job_id}: Received ASS generation request for {media_url}")
     logger.info(f"Job {job_id}: Settings received: {settings}")
@@ -120,7 +149,8 @@ def generate_ass_v1(job_id, data):
             job_id=job_id,
             language=language,
             PlayResX=canvas_width,
-            PlayResY=canvas_height
+            PlayResY=canvas_height,
+            segments=segments
         )
         if isinstance(output, dict) and 'error' in output:
             if 'available_fonts' in output:
