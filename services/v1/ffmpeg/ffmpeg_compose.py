@@ -18,6 +18,7 @@
 
 import os
 import subprocess
+from services.v1.ffmpeg.compose_guard import compose_problem
 import json
 import re
 from services.file_management import download_file
@@ -94,7 +95,19 @@ def get_metadata(filename, metadata_requests, job_id):
 
     return metadata
 
+# FFmpeg gets only what it needs to run, never this server's keys.
+FFMPEG_ENV_KEYS = ("PATH", "LD_LIBRARY_PATH", "HOME", "LANG", "LC_ALL", "TMPDIR",
+                   "FONTCONFIG_PATH", "FONTCONFIG_FILE", "OMP_NUM_THREADS")
+
+
+def ffmpeg_env():
+    return {k: v for k, v in os.environ.items() if k in FFMPEG_ENV_KEYS}
+
+
 def process_ffmpeg_compose(data, job_id):
+    problem = compose_problem(data)
+    if problem:
+        raise ValueError(problem)
     output_filenames = []
     
     # Build FFmpeg command
@@ -172,7 +185,7 @@ def process_ffmpeg_compose(data, job_id):
     
     # Execute FFmpeg command
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(command, check=True, capture_output=True, text=True, env=ffmpeg_env())
     except subprocess.CalledProcessError as e:
         raise Exception(f"FFmpeg command failed: {e.stderr}")
     

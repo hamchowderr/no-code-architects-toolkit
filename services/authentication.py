@@ -16,6 +16,7 @@
 
 
 
+import hmac
 from functools import wraps
 from flask import request, jsonify
 from config import API_KEY
@@ -23,9 +24,9 @@ from config import API_KEY
 def authenticate(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        api_key = request.headers.get('X-API-Key')
-        
-        if api_key != API_KEY:
+        api_key = request.headers.get('X-API-Key') or ''
+        # Constant-time compare, so response timing gives nothing away about the key.
+        if not API_KEY or not hmac.compare_digest(api_key.encode(), API_KEY.encode()):
             return jsonify({"message": "Unauthorized"}), 401
         return func(*args, **kwargs)
     return wrapper

@@ -16,7 +16,9 @@
 
 
 
+import ipaddress
 import os
+import socket
 import uuid
 import requests
 from urllib.parse import urlparse, parse_qs
@@ -55,6 +57,52 @@ def get_extension_from_url(url):
     # If we can't determine the extension, raise an error
     raise ValueError(f"Could not determine file extension from URL: {url}")
 
+MAX_REDIRECTS = 5
+
+
+def private_urls_blocked():
+    return os.environ.get("BLOCK_PRIVATE_URLS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_private_ip(ip):
+    ip = ipaddress.ip_address(ip)
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return not ip.is_global or ip in ipaddress.ip_network("100.64.0.0/10")
+
+
+def url_problem(url):
+    """Why a link may not be downloaded, or None. Private addresses only count when
+    BLOCK_PRIVATE_URLS is on."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return "Only http and https links can be downloaded."
+    if not private_urls_blocked():
+        return None
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror:
+        return f"{parsed.hostname} could not be found."
+    if any(_is_private_ip(info[4][0].split("%")[0]) for info in infos):
+        return f"{parsed.hostname} is a private address, which this toolkit does not download from."
+    return None
+
+
+def safe_get(url, **kwargs):
+    """requests.get that checks the link, and every redirect, with url_problem."""
+    for _ in range(MAX_REDIRECTS + 1):
+        problem = url_problem(url)
+        if problem:
+            raise ValueError(problem)
+        response = requests.get(url, allow_redirects=False, **kwargs)
+        if response.is_redirect and response.headers.get("location"):
+            url = requests.compat.urljoin(url, response.headers["location"])
+            response.close()
+            continue
+        return response
+    raise ValueError("The link redirects too many times.")
+
+
 def download_file(url, storage_path="/tmp/"):
     """Download a file from URL to local storage."""
     # Create storage directory if it doesn't exist
@@ -65,7 +113,7 @@ def download_file(url, storage_path="/tmp/"):
     local_filename = os.path.join(storage_path, f"{file_id}{extension}")
 
     try:
-        response = requests.get(url, stream=True)
+        response = safe_get(url, stream=True, timeout=(10, 300))
         response.raise_for_status()
 
         with open(local_filename, 'wb') as f:
