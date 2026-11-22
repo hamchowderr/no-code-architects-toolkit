@@ -26,6 +26,8 @@ can cut on them.
 4. Beats are placed by dynamic programming (Ellis, 2007): each lands on a strong onset
    while the gaps stay close to the tempo.
 5. Bars start on the beat in each group of four (or three) where the bass hits hardest.
+6. How loud each beat is (RMS from it to the next), in dB below the loudest beat, so an
+   edit can cut faster when the music gets louder.
 """
 
 import logging
@@ -230,6 +232,19 @@ def bar_start(beats, bass, onsets, beats_per_bar):
     return int(np.argmax(scores))
 
 
+def beat_loudness(samples, times, beat_seconds):
+    """How loud each beat is, from it to the next beat, in dB below the loudest (0 to -60)."""
+    edges = np.append(times, times[-1] + beat_seconds)
+    starts = np.clip((edges[:-1] * SAMPLE_RATE).astype(int), 0, samples.size)
+    ends = np.clip((edges[1:] * SAMPLE_RATE).astype(int), 0, samples.size)
+    levels = np.array([
+        np.sqrt(np.mean(np.square(samples[a:b], dtype=np.float64))) if b > a else 0.0
+        for a, b in zip(starts, ends)
+    ])
+    db = 20 * np.log10(np.maximum(levels, 1e-9))
+    return [round(float(max(-60.0, d)), 1) for d in db - db.max()]
+
+
 def find_beats(path, max_seconds=DEFAULT_MAX_SECONDS, beats_per_bar=4,
                min_bpm=MIN_BPM, max_bpm=MAX_BPM):
     """Tempo, beats, how strong each is, and where bars start, in seconds."""
@@ -244,6 +259,7 @@ def find_beats(path, max_seconds=DEFAULT_MAX_SECONDS, beats_per_bar=4,
         "beats": [],
         "strengths": [],
         "downbeats": [],
+        "loudness": [],
     }
     if float(np.max(np.abs(samples))) < 1e-4:
         return found  # silent: no beat to find
@@ -270,6 +286,7 @@ def find_beats(path, max_seconds=DEFAULT_MAX_SECONDS, beats_per_bar=4,
         "beats": [round(float(t), 3) for t in times],
         "strengths": [round(float(h / top), 3) for h in heights],
         "downbeats": [round(float(t), 3) for t in times[phase::beats_per_bar]],
+        "loudness": beat_loudness(samples, times, beat_seconds),
     })
     logger.info(f"Found {len(frames)} beats at {found['tempo']} BPM in {duration} s")
     return found
