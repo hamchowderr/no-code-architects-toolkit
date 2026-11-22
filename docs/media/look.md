@@ -8,7 +8,7 @@
 |---|---|---|
 | `media_url` | URL | A video or a picture. Frames are sampled every `every` seconds (default 2), at most 40. |
 | `every` | number | 0.5 to 60 seconds between frames. A long video is spread over 40 frames instead. |
-| `cuts` | boolean | Also find the video's camera cuts (`media.cuts`, in seconds), as `/v1/video/reframe` does. Reads the whole video at 10 frames a second, small; about 3 s for a minute of video. |
+| `cuts` | boolean | Also find the video's camera cuts (`media.cuts`, in seconds), as `/v1/video/reframe` does, and slow dissolves from one shot to the next (counted halfway through). Reads the whole video at 10 frames a second, small; about 3 s for a minute of video. |
 | `frames` | boolean | `false` skips the frames, for a request that only wants the cuts. Default `true`. |
 | `image_urls` | URL[] | Up to 60 pictures, such as stock thumbnails. A link that fails gets an `error` and no vector. |
 | `texts` | string[] | Up to 200 texts. Longer than CLIP's 77 word pieces is cut. |

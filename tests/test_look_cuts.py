@@ -6,6 +6,7 @@ shot.
 """
 
 import os
+import subprocess
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +28,45 @@ def test_finds_the_camera_cut():
 
 def test_one_shot_has_no_cuts():
     assert lk.camera_cuts(os.path.join(DATA, "reframe_speaker.mp4")) == []
+
+
+def _make(tmp_path, name, filters):
+    out = str(tmp_path / name)
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", os.path.join(DATA, "reframe_cut.mp4"),
+         "-filter_complex", filters, "-map", "[v]", out],
+        check=True,
+    )
+    return out
+
+
+def test_finds_a_slow_dissolve_halfway_through(tmp_path):
+    # The two shots of reframe_cut, dissolving into each other over 1.5 s from 2.3 s: no
+    # single frame changes much, so only the comparison over a longer span sees it.
+    path = _make(
+        tmp_path, "dissolve.mp4",
+        "[0:v]trim=0:3.8,setpts=PTS-STARTPTS[a];[0:v]trim=4.2:8,setpts=PTS-STARTPTS[b];"
+        "[a][b]xfade=transition=dissolve:duration=1.5:offset=2.3,format=yuv420p[v]",
+    )
+    cuts = lk.camera_cuts(path)
+    assert len(cuts) == 1
+    assert 2.85 <= cuts[0] <= 3.25
+
+
+def test_a_camera_move_in_one_shot_is_not_a_cut(tmp_path):
+    # A slow pan across the first shot keeps changing, never steadies on a new picture.
+    path = _make(
+        tmp_path, "pan.mp4",
+        "[0:v]trim=0:3.8,setpts=PTS-STARTPTS,loop=loop=1:size=95,crop=320:240:x='t*60':y=60,"
+        "format=yuv420p[v]",
+    )
+    assert lk.camera_cuts(path) == []
+
+
+def test_a_hard_cut_is_not_counted_twice():
+    # The camera cut is found by the frame-to-frame test; the long-span test sees it too and
+    # must not add a second cut beside it.
+    assert len(lk.camera_cuts(os.path.join(DATA, "reframe_cut.mp4"))) == 1
 
 
 @pytest.fixture

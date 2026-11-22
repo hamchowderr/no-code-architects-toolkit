@@ -64,6 +64,13 @@ CUT_WIDTH = 160  # ...at this width: enough to tell one shot from the next
 CUT_THRESHOLD = 0.12  # histogram distance that counts as a camera cut (as in reframe)
 CUT_RATIO = 6  # ...and this many times the usual change over the last second
 MAX_CUTS = 2000
+# Dissolves: no single frame changes much, so the picture is also compared with itself
+# DISSOLVE_SPAN frames (1.5 s) earlier. A dissolve is a big change over that span with the
+# picture steady for STEADY_SPAN frames on both sides of it; a camera move keeps changing.
+DISSOLVE_SPAN = 15
+DISSOLVE_THRESHOLD = 0.15
+STEADY_SPAN = 5
+STEADY_SHARE = 3  # each steady side changes less than a third of the change over the span
 
 _lock = threading.Lock()
 _sessions = {}
@@ -281,7 +288,8 @@ def camera_cuts(path):
 
     The same test as reframe: the colour histogram of a frame against the one before, a cut
     when the change is large both by itself and next to the usual change over the last
-    second, and never two within half a second.
+    second, and never two within half a second. Slow dissolves are found after (see
+    `dissolves`) and counted where they are halfway through.
     """
     import cv2
 
@@ -295,7 +303,7 @@ def camera_cuts(path):
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     size = CUT_WIDTH * height * 3
-    cuts, recent, before, n = [], [], None, 0
+    cuts, recent, before, n, hists = [], [], None, 0, []
     try:
         while len(cuts) < MAX_CUTS:
             buf = proc.stdout.read(size)
@@ -312,12 +320,65 @@ def camera_cuts(path):
                     cuts.append(round(n / CUT_FPS, 2))
                 recent = (recent + [change])[-CUT_FPS:]
             before = hist
+            hists.append(hist)
             n += 1
     finally:
         proc.stdout.close()
         proc.kill()
         proc.wait()
-    return cuts
+    found = cuts + [
+        time for time in dissolves(hists)
+        if all(abs(time - cut) > 1.0 for cut in cuts)
+    ]
+    return sorted(found)[:MAX_CUTS]
+
+
+def dissolves(hists):
+    """Where the picture dissolves from one shot to another, in seconds: halfway through, or
+    on the frame where a cut too soft for the frame-to-frame test happens.
+
+    `hists` holds a colour histogram for each frame read at CUT_FPS. A dissolve shows as a
+    large change between frames DISSOLVE_SPAN apart while the picture holds steady just
+    before and just after, which a pan or zoom (always changing) does not.
+    """
+    import cv2
+
+    def apart(a, b):
+        return cv2.compareHist(hists[a], hists[b], cv2.HISTCMP_BHATTACHARYYA)
+
+    span, steady = DISSOLVE_SPAN, STEADY_SPAN
+    found, last_end = [], -1
+    end = span + steady
+    while end + steady < len(hists):
+        start = end - span
+        change = apart(start, end) if start > last_end else 0.0
+        if (
+            change > DISSOLVE_THRESHOLD
+            and apart(start - steady, start) * STEADY_SHARE < change
+            and apart(end, end + steady) * STEADY_SHARE < change
+        ):
+            # The window may only have caught the start of it: follow the change over the
+            # span while it stays near its highest, and count the dissolve at the middle of
+            # where the window holds all of it.
+            changes = {end: change}
+            while end + 1 + steady < len(hists) and changes[end] > 0.8 * max(changes.values()):
+                end += 1
+                changes[end] = apart(end - span, end)
+            peak = max(changes.values())
+            held = [at for at, value in changes.items() if value >= 0.95 * peak]
+            middle = sum(held) / len(held) - span / 2
+            # A cut too soft for the frame-to-frame test still happens on one frame: when one
+            # step carries most of the change, that is where it is.
+            steps = {at: apart(at - 1, at) for at in range(min(held) - span + 1, max(held) + 1)}
+            sharpest = max(steps, key=steps.get)
+            if steps[sharpest] > 0.5 * peak:
+                middle = sharpest
+            found.append(round(middle / CUT_FPS, 2))
+            last_end = end
+            end += span
+            continue
+        end += 1
+    return found
 
 
 def look(media_path=None, picture_paths=None, texts=None, every=None, cuts=False, frames=True):
