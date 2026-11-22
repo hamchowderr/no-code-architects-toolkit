@@ -41,8 +41,8 @@ the model once and keeps it for later jobs.
 |---|---|---|
 | `WHISPER_MODEL` | `base` | Model size (`tiny`, `base`, `small`, `medium`, `large-v3`, ...). |
 | `WHISPER_DEVICE` | `auto` | Uses an NVIDIA GPU when CUDA is present, otherwise CPU. |
-| `WHISPER_COMPUTE_TYPE` | `int8` on CPU, `float16` on GPU | |
-| `WHISPER_CPU_THREADS` | CPUs / `QUEUE_WORKERS` | Threads per transcription. |
+| `WHISPER_COMPUTE_TYPE` | CPU: `int8` with VNNI (recent Intel), else `float32`. GPU: `float16` | int8 is only quick on processors with VNNI. On the AMD EPYC 7543P that runs our toolkit, float32 was about 1.4x faster. |
+| `WHISPER_CPU_THREADS` | half the CPUs, 1 to 4 | Threads per transcription. Past four it got slower, not faster. |
 | `WHISPER_BEAM_SIZE` | `1` | Greedy, as before. `5` is a little more accurate and about twice as slow. |
 | `WHISPER_VAD_FILTER` | off | `true` skips long silences before decoding. |
 
@@ -50,6 +50,10 @@ Measured on a 4 CPU cloud machine (5 minutes of a NASA podcast, `base` model):
 openai-whisper 26.1 s and 1.2 GB peak memory; faster-whisper 18.9 s and 536 MB; 98.4% of
 words identical. Four 1-minute transcriptions sent at once: 97 s on the old toolkit
 (2 Gunicorn workers), 8.8 s with `REDIS_URL` and 2 queue workers.
+
+On the shared toolkit (AMD EPYC 7543P, 6 CPUs, `base` model, 81 s of speech with word
+timings): int8 on one thread, the old default there, took 21.2 s; float32 on three
+threads, the new default, 6.6 s; int8 on six threads 27.5 s.
 
 ## Tests
 

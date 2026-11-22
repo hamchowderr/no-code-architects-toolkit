@@ -281,3 +281,24 @@ def test_request_says_when_the_file_is_not_a_video(client, file_server):
     res = client.post("/v1/video/reframe", json={"video_url": f"{file_server}/jfk.ogg"}, headers={"X-API-Key": API_KEY})
     assert res.status_code == 400
     assert "no video" in res.get_json()["message"]
+
+
+def _track(first, last):
+    t = rf.Track(0, 0)
+    for f in range(first, last + 1):
+        t.add(f, (0, 0, 10, 10), None)
+    return t
+
+
+def test_a_face_alone_on_screen_is_not_scored_for_talking():
+    # Who is talking only matters when two faces are on screen at once.
+    alone = _track(0, 50)
+    assert not rf._shares_screen(alone, done=[_track(60, 90)], open_tracks=[])
+    assert not rf._shares_screen(alone, done=[], open_tracks=[_track(55, 70)])
+
+
+def test_a_face_sharing_the_screen_is_scored():
+    a = _track(0, 50)
+    assert rf._shares_screen(a, done=[_track(40, 90)], open_tracks=[])
+    assert rf._shares_screen(a, done=[], open_tracks=[_track(30, 70)])
+    assert rf._shares_screen(a, done=[_track(0, 10)], open_tracks=[])
