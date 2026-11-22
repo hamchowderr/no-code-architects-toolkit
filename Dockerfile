@@ -161,6 +161,15 @@ RUN git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg && \
 # Add /usr/local/bin to PATH (if not already included)
 ENV PATH="/usr/local/bin:${PATH}"
 
+# Noto fonts for the scripts the fonts below lack (Devanagari, Thai, Bengali, Tamil, Hebrew,
+# Korean, Japanese, Simplified Chinese and the rest), so captions in any language draw
+# instead of showing empty boxes. Installed after the FFmpeg build so changing them never
+# rebuilds it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-noto-core \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy fonts into the custom fonts directory
 COPY ./fonts /usr/share/fonts/custom
 
