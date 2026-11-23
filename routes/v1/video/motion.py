@@ -58,6 +58,7 @@ SCHEMA = {
                     "layer": {"type": "string", "enum": ["front", "behind"]},
                     "items": {"type": "array", "maxItems": 6, "items": {"type": "string", "maxLength": 60}},
                     "shape": {"type": "string", "enum": list(DOODLES)},
+                    "look": {"type": "string", "enum": ["masthead", "glass"]},
                     "x": {"type": "number", "minimum": 0, "maximum": 100},
                     "y": {"type": "number", "minimum": 0, "maximum": 100},
                 },
@@ -111,7 +112,8 @@ SCHEMA = {
                 "type": "object",
                 "properties": {
                     **WINDOW,
-                    "scale": {"type": "number", "minimum": 1.02, "maximum": 2.5},
+                    "style": {"type": "string", "enum": list(service.ZOOM_STYLES)},
+                    "scale": {"type": "number", "minimum": 1.0, "maximum": 2.5},
                     "focus_y": {"type": "number", "minimum": 0, "maximum": 1},
                 },
                 "required": ["start", "duration"],

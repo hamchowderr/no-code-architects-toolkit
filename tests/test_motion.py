@@ -511,3 +511,42 @@ def test_magazine_graph_and_tick_list_look():
         assert f">{month}<" in page
     assert page.count('class="ck-skel"') == 2 and page.count('class="ck-seg"') == 2
     assert ">0 of 2<" in page and ">1 of 2<" in page and ">2 of 2<" in page
+
+
+def test_camera_moves_dolly_pop_and_through():
+    zooms = mo.plan_effects([], [
+        {"start": 1, "duration": 2, "style": "dolly"},
+        {"start": 4, "duration": 2, "style": "pop"},
+        {"start": 7, "duration": 0.5, "style": "through"},
+        {"start": 9, "duration": 1, "style": "wobble"},
+    ], 20)[1]
+    assert [(z["style"], z["scale"]) for z in zooms] == [("dolly", 1.3), ("pop", 1.0), ("through", 2.4), ("punch", 1.3)]
+    assert mo.needs_mask({"zooms": [{"start": 1, "style": "dolly"}]})
+    assert not mo.needs_mask({"zooms": [{"start": 1, "style": "through"}]})
+    zooms[0]["_input"], zooms[1]["_input"], zooms[1]["_head"] = 3, 4, 0.25
+    graph, video, _ = mo.filter_graph([], [], True, 20, mask_input=2, zooms=zooms, size=(360, 640), fps=25)
+    # The dolly pushes into the still of the room, under the speaker.
+    dolly = graph.index("[3:v]scale=360:640,setsar=1,zoompan=z='1+0.3000*min(1,it/2.000)'")
+    person = graph.index("[person]overlay")
+    assert dolly < person
+    # The pop: blurred room, then the card, then the speaker scaled so the head clears the card.
+    assert "[pc1]scale" not in graph and "[pcard0]overlay" in graph and person < graph.index("[pbg0]overlay") < graph.index("[pcard0]overlay") < graph.index("[pp0]overlay")
+    assert "alphamerge,scale=" in graph
+    # The through push speeds up and blurs at its end; the plain punch-in stays eased.
+    assert "pow((it-7.000)/0.500,2.2)" in graph and "gblur=sigma=9.0:enable='between(t,7.350,7.500)'" in graph
+    assert "min(1,(it-9.000)/0.12)" in graph
+
+
+def test_clean_plate_paints_the_speaker_out(tmp_path):
+    clip = str(tmp_path / "c.mp4")
+    mask = str(tmp_path / "m.mp4")
+    # Grey room with a red "speaker" square in the middle; the mask covers the square.
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=gray:s=160x160:d=1:r=25",
+                    "-vf", "drawbox=x=60:y=60:w=40:h=40:color=red:t=fill", "-pix_fmt", "yuv420p", clip], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=black:s=160x160:d=1:r=25",
+                    "-vf", "drawbox=x=60:y=60:w=40:h=40:color=white:t=fill,format=gray", "-pix_fmt", "yuv420p", mask], check=True)
+    out = mo.clean_plate(clip, mask, 0.2, str(tmp_path / "room.png"))
+    import cv2
+    img = cv2.imread(out)
+    b, g, r = img[80, 80].astype(int)
+    assert abs(r - g) < 25 and abs(r - b) < 25  # the red square is gone, filled with grey

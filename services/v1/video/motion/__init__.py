@@ -63,6 +63,14 @@ MAX_ZOOMS = 200
 MAX_OUTLINES = 50
 FPS = 30
 ZOOM_RAMP = 0.12  # seconds a punch-in takes to reach its size
+# Camera moves in "zooms": punch (a quick push in), through (an accelerating push into the
+# face with a blur, for a cut), dolly (the room moves in while the speaker stays the same
+# size) and pop (the video shrinks to a card and the speaker pops out over its top edge).
+ZOOM_STYLES = ("punch", "through", "dolly", "pop")
+MASK_ZOOMS = ("dolly", "pop")
+POP_CARD = 0.72  # the card's size in a frame pop
+POP_TOP = 0.15  # where the card's top sits, as a share of the frame's height
+POP_OVER = 0.05  # how far the head rises over the card's top edge
 
 
 class MotionError(Exception):
@@ -157,14 +165,16 @@ def plan_effects(outlines, zooms, duration):
     for raw in zooms:
         start, end = window(raw)
         if end - start >= 0.1:
+            style = raw.get("style") if raw.get("style") in ZOOM_STYLES else "punch"
+            default = {"punch": 1.3, "through": 2.4, "dolly": 1.3, "pop": 1.0}[style]
             kept_zooms.append({
-                "start": start, "end": end,
-                "scale": max(1.02, min(2.5, float(raw.get("scale", 1.3)))),
+                "start": start, "end": end, "style": style,
+                "scale": max(1.0 if style == "pop" else 1.02, min(2.5, float(raw.get("scale", default)))),
                 "focus_y": max(0.0, min(1.0, float(raw.get("focus_y", 0.35)))),
             })
     for earlier, later in zip(sorted(kept_zooms, key=lambda z: z["start"]), sorted(kept_zooms, key=lambda z: z["start"])[1:]):
         if later["start"] < earlier["end"]:
-            raise MotionError("Two punch-ins overlap. Give each its own time.")
+            raise MotionError("Two camera moves (punch-ins, dolly zooms or frame pops) overlap. Give each its own time.")
     kept_outlines.sort(key=lambda o: o["start"])
     kept_zooms.sort(key=lambda z: z["start"])
     return kept_outlines, kept_zooms
@@ -176,7 +186,11 @@ def zoom_filter(zooms, width, height, fps):
     y = "ih/2-(ih/zoom/2)"
     for zm in zooms:
         a, b, gain = zm["start"], zm["end"], zm["scale"] - 1
-        z += f"+{gain:.4f}*between(it,{a:.3f},{b:.3f})*min(1,(it-{a:.3f})/{ZOOM_RAMP})"
+        if zm.get("style") == "through":
+            # Speeds up all the way, like being pulled into the face.
+            z += f"+{gain:.4f}*between(it,{a:.3f},{b:.3f})*pow((it-{a:.3f})/{b - a:.3f},2.2)"
+        else:
+            z += f"+{gain:.4f}*between(it,{a:.3f},{b:.3f})*min(1,(it-{a:.3f})/{ZOOM_RAMP})"
     if zooms:
         # One focus height for the whole video keeps the expression short; the first zoom's wins.
         fy = zooms[0]["focus_y"]
@@ -200,21 +214,30 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
     video = "[0:v]"
     width, height = size or (0, 0)
     behind = [i for i, p in enumerate(pieces) if p.get("layer") == "behind"]
-    layered = mask_input is not None and (behind or outlines)
-    if pieces or outlines or zooms:
+    moves = [z for z in zooms if z.get("style") in MASK_ZOOMS]
+    zooms = [z for z in zooms if z.get("style") not in MASK_ZOOMS]
+    layered = mask_input is not None and (behind or outlines or moves)
+    if mask_input is None:
+        moves = []
+    if pieces or outlines or zooms or moves:
         # Even sides, so the result can be H.264.
         crop = "[0:v]crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0,setsar=1"
         parts.append(crop + (",split=2[base][keep]" if layered else "[base]"))
         video = "[base]"
         if layered:
             stickers = [o for o in outlines if o["style"] == "sticker"]
-            masks = 1 + len(stickers)
+            pops = [m for m in moves if m["style"] == "pop"]
+            masks = 1 + len(stickers) + len(pops)
             labels = "".join(f"[m{i}]" for i in range(masks))
             parts.append(
                 f"[{mask_input}:v]format=gray,scale={width}:{height}:flags=bicubic,setsar=1"
                 + (f",split={masks}{labels}" if masks > 1 else "[m0]")
             )
-            parts.append("[keep][m0]alphamerge[person]")
+            if pops:
+                parts.append(f"[keep]split={1 + len(pops)}[keep0]" + "".join(f"[keep{k + 1}]" for k in range(len(pops))))
+                parts.append("[keep0][m0]alphamerge[person]")
+            else:
+                parts.append("[keep][m0]alphamerge[person]")
 
         if pieces:
             parts.append(f"[1:v]split={len(pieces)}" + "".join(f"[s{i}]" for i in range(len(pieces))) if len(pieces) > 1 else "[1:v]null[s0]")
@@ -238,7 +261,25 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
             video = out
 
         front = [i for i in range(len(pieces)) if i not in behind] if layered else list(range(len(pieces)))
+        def over(label, start, end, extra=""):
+            nonlocal video
+            out = f"[v{step[0]}]"
+            step[0] += 1
+            parts.append(f"{video}{label}overlay=eof_action=pass:format=auto{extra}:enable='between(t,{start:.3f},{end:.3f})'{out}")
+            video = out
+
         if layered:
+            # Dolly zooms: the room without the speaker (a still, painted in where they
+            # stand) pushes in behind them while they stay the same size.
+            for k, mv in enumerate(m for m in moves if m["style"] == "dolly"):
+                a, b, gain = mv["start"], mv["end"], mv["scale"] - 1
+                ln = b - a
+                parts.append(
+                    f"[{mv['_input']}:v]scale={width}:{height},setsar=1,"
+                    f"zoompan=z='1+{gain:.4f}*min(1,it/{ln:.3f})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={width}x{height}:fps={fps:.6f},"
+                    f"setpts=PTS-STARTPTS+{a:.3f}/TB[dl{k}]"
+                )
+                over(f"[dl{k}]", a, b)
             for i in behind:
                 lay(i)
             for j, ol in enumerate(outlines):
@@ -269,12 +310,38 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
             step[0] += 1
             parts.append(f"{video}[person]overlay=format=auto{out}")
             video = out
+            # Frame pops: a dark, blurred room; the room as a smaller card; the speaker,
+            # bigger than the card, standing on its bottom edge so they break out of it.
+            for k, mv in enumerate(pops):
+                a, b = mv["start"], mv["end"]
+                cw, ch = int(width * POP_CARD) // 2 * 2, int(height * POP_CARD) // 2 * 2
+                edge = max(2, int(min(width, height) * 0.006))
+                cx, cy = (width - cw) // 2, int(height * POP_TOP)
+                # The speaker is scaled so their head rises POP_OVER over the card's top and
+                # their body still reaches the bottom of the frame.
+                head = mv.get("_head", 0.2)
+                grow = max(1.0, (1 - POP_TOP + POP_OVER) / max(0.3, 1 - head))
+                pw, ph = int(width * grow) // 2 * 2, int(height * grow) // 2 * 2
+                py = height - ph
+                parts.append(f"[{mv['_input']}:v]scale={width}:{height},setsar=1,setpts=PTS-STARTPTS+{a:.3f}/TB,split=2[pb{k}][pc{k}]")
+                parts.append(f"[pb{k}]gblur=sigma={min(width, height) / 30:.1f},eq=brightness=-0.28:saturation=0.8[pbg{k}]")
+                parts.append(
+                    f"[pc{k}]scale={cw - 2 * edge}:{ch - 2 * edge},pad={cw}:{ch}:{edge}:{edge}:color=0x1c1d21[pcard{k}]"
+                )
+                parts.append(f"[keep{k + 1}][m{1 + len(stickers) + k}]alphamerge,scale={pw}:{ph}[pp{k}]")
+                over(f"[pbg{k}]", a, b)
+                over(f"[pcard{k}]", a, b, f":x={cx}:y={cy}")
+                over(f"[pp{k}]", a, b, f":x={(width - pw) // 2}:y={py}")
         for i in front:
             lay(i)
         if zooms:
             out = f"[v{step[0]}]"
             step[0] += 1
-            parts.append(f"{video}{zoom_filter(zooms, width, height, fps)}{out}")
+            blur = "".join(
+                f",gblur=sigma={min(width, height) / 40:.1f}:enable='between(t,{z['end'] - min(0.15, (z['end'] - z['start']) / 2):.3f},{z['end']:.3f})'"
+                for z in zooms if z.get("style") == "through"
+            )
+            parts.append(f"{video}{zoom_filter(zooms, width, height, fps)}{blur}{out}")
             video = out
         parts.append(f"{video}format=yuv420p[vout]")
         video = "[vout]"
@@ -299,9 +366,47 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
     return ";".join(parts), video, audio
 
 
+def clean_plate(src, mask_path, at, out):
+    """A still of the room at `at` seconds with the speaker painted out (OpenCV inpainting),
+    for camera moves that show what is behind them."""
+    import cv2
+    import numpy as np
+
+    def grab(path, gray):
+        raw = subprocess.run(
+            ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, at):.3f}", "-i", path, "-frames:v", "1",
+             "-f", "image2pipe", "-vcodec", "png", "-"],
+            capture_output=True,
+        ).stdout
+        img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE if gray else cv2.IMREAD_COLOR)
+        if img is None:
+            raise RuntimeError("Could not read a frame for the camera move.")
+        return img
+
+    frame = grab(src, False)
+    h, w = frame.shape[:2]
+    m = cv2.resize(grab(mask_path, True), (w, h)) > 100
+    # Painted at a quarter size (fast, and soft is better here), then put back at full size.
+    small = cv2.resize(frame, (max(2, w // 4), max(2, h // 4)), interpolation=cv2.INTER_AREA)
+    sm = cv2.resize(m.astype(np.uint8) * 255, (small.shape[1], small.shape[0]))
+    k = max(3, int(min(small.shape[:2]) * 0.06)) | 1
+    sm = cv2.dilate(sm, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    filled = cv2.inpaint(small, sm, 9, cv2.INPAINT_TELEA)
+    filled = cv2.GaussianBlur(filled, (0, 0), 3)
+    big = cv2.resize(filled, (w, h), interpolation=cv2.INTER_CUBIC)
+    region = cv2.resize(sm, (w, h)) > 0
+    frame[region] = big[region]
+    cv2.imwrite(out, frame)
+    return out
+
+
 def needs_mask(request):
     """True when the request draws something that needs the speaker cut out."""
-    return bool(request.get("outlines")) or any((p.get("layer") == "behind") for p in request.get("pieces") or [])
+    return (
+        bool(request.get("outlines"))
+        or any((p.get("layer") == "behind") for p in request.get("pieces") or [])
+        or any((z.get("style") in MASK_ZOOMS) for z in request.get("zooms") or [])
+    )
 
 
 def find_browser():
@@ -367,9 +472,10 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
     outlines, zooms = plan_effects(request.get("outlines") or [], request.get("zooms") or [], info["duration"])
     if not pieces and not cues and not outlines and not zooms:
         raise MotionError("Nothing to add: no motion pieces, sound effects, outlines or punch-ins fall inside the video.")
-    layered = any(p["layer"] == "behind" for p in pieces) or outlines
+    moves = [z for z in zooms if z["style"] in MASK_ZOOMS]
+    layered = any(p["layer"] == "behind" for p in pieces) or outlines or moves
     if layered and not mask:
-        raise MotionError("Pieces behind the speaker and sticker outlines need the speaker cut out first.")
+        raise MotionError("Pieces behind the speaker, outlines, dolly zooms and frame pops need the speaker cut out first.")
 
     # With the speaker's mask, a doodle with no place given goes just above their head, and
     # big words behind them drop so the head covers the bottom of the letters.
@@ -384,8 +490,9 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
         elif piece["type"] == "big_text" and piece["layer"] == "behind":
             spot = head_top(mask, piece["start"] + 0.2, width, height)
             if spot:
-                # Capital height of the masthead (Playfair caps ~0.7em, stretched 1.45x).
-                letters = big_text_size(piece.get("title") or "", width / short) * short / 100 * 0.7 * 1.45 / height * 100
+                # Capital height: Playfair caps ~0.7em stretched 1.45x; glass letters are smaller.
+                stretch = 0.84 * 0.72 if piece.get("look") == "glass" else 0.7 * 1.45
+                letters = big_text_size(piece.get("title") or "", width / short) * short / 100 * stretch / height * 100
                 piece["y"] = max(3.0, min(60.0, spot[1] - letters * 0.62))
 
     # Logos are fetched once and handed to the sheet as local files.
@@ -418,6 +525,14 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
                           color=_hex_rgb(ol["color"]), line=ol["width"])
             ol["_input"] = mask_input + 1 + k
             inputs += ["-i", drawn]
+        for k, mv in enumerate(moves):
+            # The room without the speaker, as a still the move plays over.
+            still = os.path.join(work_dir, f"room_{k}.png")
+            clean_plate(src, mask, mv["start"], still)
+            spot = head_top(mask, mv["start"] + 0.2, width, height)
+            mv["_head"] = spot[1] / 100 if spot else 0.2
+            mv["_input"] = mask_input + 1 + sum(1 for o in outlines if o["style"] == "sketch") + k
+            inputs += ["-loop", "1", "-framerate", f"{info['fps']:.6f}", "-t", f"{mv['end'] - mv['start']:.3f}", "-i", still]
 
     graph, video, audio = filter_graph(
         pieces, cues, info["has_audio"], info["duration"],
@@ -426,7 +541,7 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
     cmd = ["ffmpeg", "-y", "-v", "error", *inputs]
     if graph:
         cmd += ["-filter_complex", graph]
-    if pieces or outlines or zooms:
+    if pieces or outlines or zooms or moves:
         cmd += ["-map", video, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
     else:
         cmd += ["-map", "0:v", "-c:v", "copy"]

@@ -33,7 +33,7 @@ The same mask draws outlines around the person (`outlines`): a thin hand-drawn l
 | `style.font` | font name | look's font | Any font installed on the toolkit or on Google Fonts |
 | `mask_url` | string | | The speaker's mask from `/v1/video/cutout`. Only used by behind pieces and outlines |
 | `outlines` | array, up to 50 | `[]` | Outlines around the person: `{start?, duration?, style?, color?, width?}`. `style` is `sketch` (default) or `sticker`. No `duration` runs to the end. `width` is a percent of the frame's short side (0.3 to 4; default 0.45 for sketch, 1.4 for sticker), `color` defaults to white |
-| `zooms` | array, up to 200 | `[]` | Punch-ins: `{start, duration, scale?, focus_y?}`. `scale` 1.02 to 2.5 (default 1.3). `focus_y` is how far down the frame to zoom into, 0 (top) to 1 (bottom), default 0.35 (where a face usually is). Punch-ins cannot overlap |
+| `zooms` | array, up to 200 | `[]` | Camera moves: `{start, duration, style?, scale?, focus_y?}`. `style`: `punch` (default, a quick push in), `through` (a push into the face that speeds up and blurs at its end, for a cut; default scale 2.4), `dolly` (the room pushes in behind the speaker while they stay the same size) or `pop` (the video shrinks to a card on a dark, blurred room and the speaker breaks out over its top edge). `dolly` and `pop` need the speaker's mask: the room behind them is painted in from one still. `scale` 1 to 2.5 (default 1.3). `focus_y` is how far down the frame to zoom into, 0 (top) to 1 (bottom), default 0.35. Moves cannot overlap |
 | `sound_volume` | number, 0 to 2 | `1` | Scales every sound; `0` mutes them all |
 | `piece_sounds` | boolean | `true` | Whether pieces play their own sound |
 | `webhook_url` | string | | Send the answer here when done (recommended) |
@@ -54,7 +54,7 @@ Each piece is `{type, start, duration?, title?, subtitle?, image?, items?, shape
 | `quote` | The quote | Who said it | 4.5 s (2 to 12) | thud |
 | `transition` | | | 0.7 s (0.4 to 1.5) | whoosh |
 | `logo` | | | 3 s (1 s to the whole video). Needs `image` (a link to the logo) | ding |
-| `big_text` | A magazine-cover name across the top: tall white serif capitals (Playfair Display) sized to fill the width | Small line above it | 3 s (1 s to the whole video). `y` sets the top in percent; behind the speaker with a mask, it drops so the head covers the bottom of the letters | impact |
+| `big_text` | A magazine-cover name across the top: tall white serif capitals (Playfair Display) sized to fill the width. `"look": "glass"` draws heavy chrome letters instead | Small line above it | 3 s (1 s to the whole video). `y` sets the top in percent; behind the speaker with a mask, it drops so the head covers the bottom of the letters | impact |
 | `graph` | Pill at the end of the line, such as `10X` | | 3.5 s (2 to 10). A thin line in the accent colour with a soft glow under it, creeping then shooting up. `items`: up to 6 labels along the top (default `JAN` to `JUN`) | riser |
 | `doodle` | | | 2.5 s (1 s to the whole video). `shape`: `crown`, `star`, `heart`, `arrow`, `burst` or `circle`. `x`, `y` place its centre in percent; behind the speaker with a mask and no place given, it goes just above their head | pop |
 | `checklist` | Small heading | | 4 s (2 to 12). A dark glass card with a count (`1 of 3`) and a progress bar; `items`: up to 6 lines, each typed in and ticked in turn while the rest wait as grey bars | tick |

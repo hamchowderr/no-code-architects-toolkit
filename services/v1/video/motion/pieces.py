@@ -162,7 +162,8 @@ def piece_html(index, piece, t0):
         # Fills the frame's width: the longer the word, the smaller it is drawn.
         size = big_text_size(words, piece.get("_aspect", 1.0))
         top = f"top:{float(piece['y']):.1f}%;" if piece.get("y") is not None else ""
-        inner = f'<div class="bt" style="--fs:{size:.2f};{top}">'
+        glass = " bt-glass" if piece.get("look") == "glass" else ""
+        inner = f'<div class="bt{glass}" style="--fs:{size:.2f};{top}">'
         if sub:
             inner += f'<div class="bt-kick a-up">{sub}</div>'
         inner += f'<div class="bt-word a-rise"><span>{title}</span></div></div>'
@@ -368,6 +369,9 @@ html,body{overflow:hidden;background:transparent}
 .bt-word{font-family:"Playfair Display","Libre Baskerville",serif;font-weight:400;font-size:calc(var(--u)*var(--fs));line-height:.86;letter-spacing:-.035em;text-transform:uppercase;white-space:nowrap;color:var(--text);text-shadow:0 calc(var(--u)*.2) calc(var(--u)*1.6) rgba(0,0,0,.18)}
 .bt-word span{display:inline-block;transform:scaleY(1.45);transform-origin:50% 0}
 .look-bold .bt-word,.look-neon .bt-word{font-weight:400}
+/* Glass: heavy, wide letters in bevelled chrome with a dark edge and a little depth. */
+.bt-glass .bt-word{font-family:"Arial Black","Roboto",sans-serif;font-weight:900;letter-spacing:.02em;font-size:calc(var(--u)*var(--fs)*.84);text-shadow:none}
+.bt-glass .bt-word span{transform:none;color:transparent;background:linear-gradient(180deg,#ffffff 0%,#e6e9ee 30%,#9aa1ab 48%,#5d636c 52%,#dfe3e8 70%,#b8bec6 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke:calc(var(--u)*.22) rgba(30,33,40,.9);filter:drop-shadow(0 calc(var(--u)*.35) 0 #6b717a) drop-shadow(0 calc(var(--u)*.35) 0 #3c4048) drop-shadow(0 calc(var(--u)*1) calc(var(--u)*1.4) rgba(0,0,0,.4))}
 
 /* graph rising behind the speaker */
 .gr{position:absolute;left:var(--side);right:var(--side);top:4%;height:34%}
