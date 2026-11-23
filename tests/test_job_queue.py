@@ -71,7 +71,7 @@ def post(client, path, body):
 def run_worker_until_empty():
     from rq import SimpleWorker
 
-    worker = SimpleWorker([job_queue.get_queue()], connection=job_queue.get_connection())
+    worker = SimpleWorker([job_queue.get_queue()], connection=job_queue.get_connection(), serializer=job_queue.serializer())
     worker.work(burst=True)
 
 
@@ -212,7 +212,7 @@ def _left_running(conn, webhook_url, worker_name, job_id="job-left"):
 
     queued_at = time.time() - 120
     job_queue.enqueue("/v1/test/echo", {"value": "x", "id": "step-7", "webhook_url": webhook_url}, job_id, queued_at)
-    job = Job.fetch(job_id, connection=conn)
+    job = Job.fetch(job_id, connection=conn, serializer=job_queue.serializer())
     job.set_status(JobStatus.STARTED)
     job.worker_name = worker_name
     job.save()
@@ -291,3 +291,17 @@ def test_a_job_left_by_the_same_numbered_worker_before_a_restart_is_failed(flask
     assert job_queue.fail_abandoned_jobs() == [job_id]
     [hook] = webhook_sink.wait_for(1)
     assert hook["body"]["message"] == job_queue.ABANDONED_MESSAGE
+
+
+def test_jobs_are_stored_as_json_not_pickle():
+    # A pickled job runs code when it is loaded; JSON can only ever be data.
+    conn = fakeredis.FakeRedis()
+    job_queue.set_connection(conn)
+    job_queue.enqueue("/v1/toolkit/test", {"x": 1}, "json-job", 1.0)
+    raw = conn.hget("rq:job:json-job", "data")
+    assert raw is not None
+    import json, zlib
+
+    decoded = json.loads(zlib.decompress(raw))
+    assert decoded[2] == ["/v1/toolkit/test", {"x": 1}, "json-job", 1.0]
+    job_queue.set_connection(None)

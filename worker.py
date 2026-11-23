@@ -61,6 +61,7 @@ def run_one_worker(index):
         [job_queue.get_queue()],
         connection=job_queue.get_connection(),
         name=worker_name(index),
+        serializer=job_queue.serializer(),
     )
     logger.info(f"Worker {index} listening on queue '{job_queue.queue_name()}'")
     worker.work(with_scheduler=False)

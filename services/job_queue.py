@@ -111,10 +111,18 @@ def set_connection(connection):
     _connection = connection
 
 
+def serializer():
+    """Jobs are stored as JSON, not pickle: a job read from Redis can never run code just
+    by being loaded, even if someone could write to Redis."""
+    from rq.serializers import JSONSerializer
+
+    return JSONSerializer
+
+
 def get_queue():
     from rq import Queue
 
-    return Queue(queue_name(), connection=get_connection())
+    return Queue(queue_name(), connection=get_connection(), serializer=serializer())
 
 
 def queue_length():
@@ -277,7 +285,7 @@ def fail_abandoned_jobs():
         if not status or status.get("job_status") != "running":
             continue
         try:
-            job = Job.fetch(job_id, connection=conn)
+            job = Job.fetch(job_id, connection=conn, serializer=serializer())
         except NoSuchJobError:
             # Not a queued job (it ran inside a web request), or long gone from RQ.
             continue

@@ -222,6 +222,7 @@ Each endpoint is supported by robust payload validation and detailed API documen
 #### `REDIS_URL`
 - **Purpose**: One shared job queue, so jobs with a `webhook_url` run side by side on `QUEUE_WORKERS` worker processes.
 - **Default**: not set (each Gunicorn worker keeps its own queue)
+- **Security**: on a server other apps share, give Redis a password (`redis-server --requirepass <password>`) and put it in the link: `redis://:<password>@redis:6379/0`. Jobs are stored as JSON, so nothing read from Redis is ever run as code.
 - **More**: [docs/toolkit/queue_and_transcription.md](docs/toolkit/queue_and_transcription.md), which also covers `QUEUE_WORKERS` and the faster-whisper settings. Settings most people never change are in [docs/toolkit/other_settings.md](docs/toolkit/other_settings.md).
 
 #### `MAX_QUEUE_LENGTH`
