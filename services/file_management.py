@@ -17,6 +17,7 @@
 
 
 import ipaddress
+import re
 import os
 import socket
 import uuid
@@ -101,6 +102,58 @@ def safe_get(url, **kwargs):
             continue
         return response
     raise ValueError("The link redirects too many times.")
+
+
+LINK_IN_TEXT = re.compile(r"https?://(?:\[[0-9a-f:.]+\])?[^\s'\"\\\]\[;,]*", re.I)
+
+
+def _links(value, key=""):
+    """Every link a request names: values under a key with "url" in it, and links written
+    into a filter graph (subtitles='https://...')."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            yield from _links(v, str(k).lower())
+    elif isinstance(value, list):
+        for v in value:
+            yield from _links(v, key)
+    elif isinstance(value, str):
+        if "url" in key:
+            if re.match(r"^\s*[a-z][a-z0-9+.-]*://", value, re.I):
+                yield value.strip()
+        elif key == "filter" or key == "argument":
+            yield from LINK_IN_TEXT.findall(value)
+
+
+def redirect_problem(url):
+    """Follows a link's redirects without downloading it and checks each address. A server
+    that refuses the check is left to the download itself."""
+    for _ in range(MAX_REDIRECTS):
+        try:
+            response = requests.head(url, allow_redirects=False, timeout=(5, 10))
+        except requests.RequestException:
+            return None
+        location = response.headers.get("location") if response.is_redirect else None
+        response.close()
+        if not location:
+            return None
+        url = requests.compat.urljoin(url, location)
+        problem = url_problem(url)
+        if problem:
+            return problem
+    return "The link redirects too many times."
+
+
+def payload_url_problem(data):
+    """Why a request's links may not be used, or None. Most endpoints hand links straight
+    to FFmpeg or ffprobe, which fetch them on their own, so every link is checked here,
+    before any work starts, and not only those the toolkit downloads itself."""
+    if not private_urls_blocked():
+        return None
+    for url in _links(data):
+        problem = url_problem(url) or redirect_problem(url)
+        if problem:
+            return problem
+    return None
 
 
 def download_file(url, storage_path="/tmp/"):

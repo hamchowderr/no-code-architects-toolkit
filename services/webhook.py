@@ -79,9 +79,15 @@ def send_webhook(webhook_url, data):
     """POSTs the job's result to its webhook URL. Never raises: a failure is logged."""
     job_id = data.get("job_id") if isinstance(data, dict) else None
     try:
+        from services.file_management import url_problem
+        problem = url_problem(webhook_url)
+        if problem:
+            raise ValueError(problem)
         with _session() as session:
-            response = session.post(webhook_url, json=data, timeout=webhook_timeout())
+            response = session.post(
+                webhook_url, json=data, timeout=webhook_timeout(), allow_redirects=False
+            )
         response.raise_for_status()
         logger.info(f"Webhook sent for job {job_id} ({response.status_code})")
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
         logger.error(f"Webhook failed for job {job_id}: {e}")
