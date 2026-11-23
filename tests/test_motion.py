@@ -166,11 +166,15 @@ def test_pieces_sit_in_front_unless_they_say_behind_and_new_pieces_need_their_wo
 
 def test_outlines_and_punch_ins_stay_inside_the_video_and_punch_ins_cannot_overlap():
     outlines, zooms = mo.plan_effects(
-        [{"start": 2, "duration": 50, "color": "#ff0000", "width": 9}, {"start": 40}],
+        [{"start": 2, "duration": 50, "color": "#ff0000", "width": 9, "style": "sticker"}, {"start": 40}, {"start": 3, "duration": 2}],
         [{"start": 5, "duration": 1, "scale": 4}, {"start": 1, "duration": 1}],
         30,
     )
-    assert outlines == [{"start": 2.0, "end": 30.0, "color": "#ff0000", "width": 4.0}]
+    # A sketch line is thin unless asked otherwise; a sticker ring is thicker.
+    assert outlines == [
+        {"start": 2.0, "end": 30.0, "style": "sticker", "color": "#ff0000", "width": 4.0},
+        {"start": 3.0, "end": 5.0, "style": "sketch", "color": "#ffffff", "width": 0.45},
+    ]
     assert [(z["start"], z["end"], z["scale"]) for z in zooms] == [(1.0, 2.0, 1.3), (5.0, 6.0, 2.5)]
     with pytest.raises(mo.MotionError, match="overlap"):
         mo.plan_effects([], [{"start": 1, "duration": 2}, {"start": 2, "duration": 2}], 30)
@@ -227,7 +231,10 @@ def test_graph_lays_behind_pieces_then_outlines_then_the_person_then_front_piece
         {"type": "big_text", "start": 1.0, "duration": 2.0, "layer": "behind"},
         {"type": "keyword", "start": 1.5, "duration": 1.0, "layer": "front"},
     ]
-    outlines = [{"start": 0.0, "end": 4.0, "color": "#ffffff", "width": 1.5}]
+    outlines = [
+        {"start": 0.0, "end": 4.0, "style": "sticker", "color": "#ffffff", "width": 1.5},
+        {"start": 5.0, "end": 7.0, "style": "sketch", "color": "#ffffff", "width": 0.45, "_input": 3},
+    ]
     zooms = [{"start": 5.0, "end": 6.0, "scale": 1.3, "focus_y": 0.35}]
     graph, video, _ = mo.filter_graph(pieces, [], True, 8, mask_input=2, outlines=outlines, zooms=zooms, size=(640, 360), fps=25)
     assert "split=2[base][keep]" in graph and "[2:v]format=gray,scale=640:360" in graph and "split=2[m0][m1]" in graph
@@ -238,6 +245,9 @@ def test_graph_lays_behind_pieces_then_outlines_then_the_person_then_front_piece
     front = graph.index("[p1]overlay")
     assert behind < ring < person < front
     assert "lutrgb=r=255:g=255:b=255" in graph and "gblur=sigma=2.70" in graph  # 1.5% of 360 px, halved
+    # The sketch line is its own drawn video (input 3), shifted to its time, under the person.
+    assert "[3:v]setpts=PTS-STARTPTS+5.000/TB[sk1]" in graph
+    assert ring < graph.index("[sk1]overlay") < person
     assert "zoompan=z='1+0.3000*between(it,5.000,6.000)" in graph and "s=640x360:fps=25.000000" in graph
     assert video == "[vout]"
 
@@ -455,3 +465,49 @@ def test_catalog_lists_pieces_looks_and_sounds(client):
     assert set(body["pieces"]) == set(PIECES) and "bold" in body["looks"] and "whoosh" in body["sounds"]
     assert body["pieces"]["lower_third"]["sound"] == "slide"
     assert body["layers"] == ["front", "behind"] and "crown" in body["doodles"]
+
+
+def test_sketch_outline_traces_a_wobbly_line_outside_the_mask_and_redraws_it(tmp_path):
+    from services.v1.video.motion import sketch
+
+    # A white disc on black, as a speaker's mask would be.
+    mask = str(tmp_path / "mask.mp4")
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=black:s=160x160:d=1:r=25",
+         "-vf", "geq=lum='if(lt(hypot(X-80,Y-80),40),255,0)',format=gray", "-c:v", "libx264", "-pix_fmt", "yuv420p", mask],
+        check=True,
+    )
+    disc = np.zeros((160, 160), bool)
+    yy, xx = np.mgrid[:160, :160]
+    disc[np.hypot(xx - 80, yy - 80) < 40] = True
+    a = sketch.trace(disc, offset=6, wobble=1.5, seed=1)
+    b = sketch.trace(disc, offset=6, wobble=1.5, seed=2)
+    assert len(a) == 1
+    radius = np.hypot(a[0][:, 0] - 80, a[0][:, 1] - 80)
+    assert 42 < radius.mean() < 50  # a little way outside the disc
+    assert not np.allclose(a[0], b[0])  # each redraw wobbles differently
+
+    out = str(tmp_path / "line.mov")
+    assert sketch.render(mask, out, 0.0, 1.0, 160, 160, 25) == 25
+    frame = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", "0.8", "-i", out, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    rgba = np.frombuffer(frame, np.uint8).reshape(160, 160, 4)
+    ink = rgba[..., 3] > 128
+    assert ink.any() and not ink[80, 80]  # a line, not a filled shape
+    assert (rgba[ink][:, :3] == 255).all()  # the line keeps its colour to the edges
+
+
+def test_magazine_graph_and_tick_list_look():
+    pieces = [
+        {"type": "big_text", "duration": 3, "title": "Opus"},
+        {"type": "graph", "duration": 3.5, "title": "10X"},
+        {"type": "checklist", "duration": 4, "title": "What it does", "items": ["Run an agent", "Ship it"]},
+    ]
+    page = sheet_html(pieces, 1080, 1920, {}, 10.5)
+    assert '"Playfair Display"' in page and "<span>Opus</span>" in page  # a serif masthead
+    for month in ("JAN", "FEB", "MAR", "APR", "MAY", "JUN"):  # months along the top by default
+        assert f">{month}<" in page
+    assert page.count('class="ck-skel"') == 2 and page.count('class="ck-seg"') == 2
+    assert ">0 of 2<" in page and ">1 of 2<" in page and ">2 of 2<" in page

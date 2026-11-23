@@ -95,7 +95,12 @@ SCHEMA = {
             "maxItems": service.MAX_OUTLINES,
             "items": {
                 "type": "object",
-                "properties": {**WINDOW, "color": COLOR, "width": {"type": "number", "minimum": 0.3, "maximum": 4}},
+                "properties": {
+                    **WINDOW,
+                    "style": {"type": "string", "enum": ["sketch", "sticker"]},
+                    "color": COLOR,
+                    "width": {"type": "number", "minimum": 0.3, "maximum": 4},
+                },
                 "additionalProperties": False,
             },
         },

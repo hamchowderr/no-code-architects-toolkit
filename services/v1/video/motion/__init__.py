@@ -29,7 +29,8 @@ video's sound untouched.
 Behind the speaker: a piece with "layer": "behind" is drawn between the background and
 the person. The person is cut back out with their mask (services/v1/video/cutout.py) and
 laid over it, so words, graphs and doodles sit behind their head. The same mask draws
-sticker outlines ("outlines") around the person. "zooms" punch in on the picture last.
+outlines around the person: "sketch" (a thin hand-drawn line that redraws itself, see
+sketch.py) or "sticker" (a solid ring hugging them). "zooms" punch in on the picture last.
 """
 
 import glob
@@ -42,6 +43,7 @@ import time
 
 from ..cutout import CutoutError, head_top
 from ..cutout import probe as probe_video
+from . import sketch
 from .pieces import NEEDS_TITLE, PIECES, big_text_size, sheet_html
 
 logger = logging.getLogger(__name__)
@@ -145,10 +147,11 @@ def plan_effects(outlines, zooms, duration):
     for raw in outlines:
         start, end = window(raw)
         if end - start >= 0.1:
+            style = raw.get("style") if raw.get("style") in ("sketch", "sticker") else "sketch"
             kept_outlines.append({
-                "start": start, "end": end,
+                "start": start, "end": end, "style": style,
                 "color": raw.get("color") or "#ffffff",
-                "width": max(0.3, min(4.0, float(raw.get("width", 1.4)))),
+                "width": max(0.3, min(4.0, float(raw.get("width", 0.45 if style == "sketch" else 1.4)))),
             })
     kept_zooms = []
     for raw in zooms:
@@ -204,7 +207,8 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
         parts.append(crop + (",split=2[base][keep]" if layered else "[base]"))
         video = "[base]"
         if layered:
-            masks = 1 + len(outlines)
+            stickers = [o for o in outlines if o["style"] == "sticker"]
+            masks = 1 + len(stickers)
             labels = "".join(f"[m{i}]" for i in range(masks))
             parts.append(
                 f"[{mask_input}:v]format=gray,scale={width}:{height}:flags=bicubic,setsar=1"
@@ -238,6 +242,17 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
             for i in behind:
                 lay(i)
             for j, ol in enumerate(outlines):
+                if ol["style"] == "sketch":
+                    # Drawn ahead of time (sketch.py) as its own see-through video.
+                    out = f"[v{step[0]}]"
+                    step[0] += 1
+                    parts.append(f"[{ol['_input']}:v]setpts=PTS-STARTPTS+{ol['start']:.3f}/TB[sk{j}]")
+                    parts.append(
+                        f"{video}[sk{j}]overlay=eof_action=pass:format=auto:enable='between(t,{ol['start']:.3f},{ol['end']:.3f})'{out}"
+                    )
+                    video = out
+                    continue
+                j = stickers.index(ol)
                 # The mask, spread out by the outline's width, filled with its colour.
                 px = outline_px(ol["width"], width, height)
                 r, g, b = _hex_rgb(ol["color"])
@@ -369,8 +384,9 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
         elif piece["type"] == "big_text" and piece["layer"] == "behind":
             spot = head_top(mask, piece["start"] + 0.2, width, height)
             if spot:
-                letters = big_text_size(piece.get("title") or "", width / short) * short / 100 * 0.9 / height * 100
-                piece["y"] = max(4.0, min(60.0, spot[1] - letters * 0.6))
+                # Capital height of the masthead (Playfair caps ~0.7em, stretched 1.45x).
+                letters = big_text_size(piece.get("title") or "", width / short) * short / 100 * 0.7 * 1.45 / height * 100
+                piece["y"] = max(3.0, min(60.0, spot[1] - letters * 0.62))
 
     # Logos are fetched once and handed to the sheet as local files.
     image_files = {}
@@ -396,6 +412,12 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
     if layered:
         mask_input = 2 + len(cues)
         inputs += ["-i", mask]
+        for k, ol in enumerate(o for o in outlines if o["style"] == "sketch"):
+            drawn = os.path.join(work_dir, f"sketch_{k}.mov")
+            sketch.render(mask, drawn, ol["start"], ol["end"], width, height, info["fps"],
+                          color=_hex_rgb(ol["color"]), line=ol["width"])
+            ol["_input"] = mask_input + 1 + k
+            inputs += ["-i", drawn]
 
     graph, video, audio = filter_graph(
         pieces, cues, info["has_audio"], info["duration"],
