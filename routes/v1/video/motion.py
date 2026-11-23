@@ -54,6 +54,7 @@ SCHEMA = {
                     "title": TEXT,
                     "subtitle": TEXT,
                     "image": {"type": "string", "format": "uri"},
+                    "images": {"type": "array", "minItems": 1, "maxItems": 9, "items": {"type": "string", "format": "uri"}},
                     "sound": {"type": ["string", "null"], "enum": [*service.SOUNDS, None]},
                     "layer": {"type": "string", "enum": ["front", "behind"]},
                     "items": {"type": "array", "maxItems": 6, "items": {"type": "string", "maxLength": 60}},
@@ -113,8 +114,9 @@ SCHEMA = {
                 "properties": {
                     **WINDOW,
                     "style": {"type": "string", "enum": list(service.ZOOM_STYLES)},
-                    "scale": {"type": "number", "minimum": 1.0, "maximum": 2.5},
+                    "scale": {"type": "number", "minimum": 0.25, "maximum": 2.5},
                     "focus_y": {"type": "number", "minimum": 0, "maximum": 1},
+                    "image": {"type": "string", "format": "uri"},
                 },
                 "required": ["start", "duration"],
                 "additionalProperties": False,

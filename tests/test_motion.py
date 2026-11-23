@@ -118,7 +118,7 @@ def test_every_listed_sound_is_a_file_with_a_licence_note():
 
 def test_every_piece_default_sound_exists():
     for name, (_, sound, shortest, longest) in PIECES.items():
-        assert sound in mo.SOUNDS, name
+        assert sound is None or sound in mo.SOUNDS, name  # a waveform sits under speech, so it stays quiet
         assert 0 < shortest < longest
 
 
@@ -550,3 +550,61 @@ def test_clean_plate_paints_the_speaker_out(tmp_path):
     img = cv2.imread(out)
     b, g, r = img[80, 80].astype(int)
     assert abs(r - g) < 25 and abs(r - b) < 25  # the red square is gone, filled with grey
+
+
+def test_media_pieces_need_their_pictures_and_words():
+    with pytest.raises(mo.MotionError, match="picture"):
+        mo.plan([{"type": "wall", "start": 1}], [], 20)
+    with pytest.raises(mo.MotionError, match="at most 1"):
+        mo.plan([{"type": "phone", "start": 1, "images": ["a.png", "b.png"]}], [], 20)
+    with pytest.raises(mo.MotionError):
+        mo.plan([{"type": "ransom", "start": 1}], [], 20)
+    # An orbit goes round the speaker: half of it behind, half in front, with one sound.
+    pieces, cues = mo.plan([{"type": "orbit", "start": 2, "images": ["a.png", "b.png", "c.png"]}], [], 20)
+    assert sorted(p["layer"] for p in pieces) == ["behind", "front"] and len(cues) == 1
+
+
+def test_media_pieces_draw_their_pictures_and_cards():
+    pieces = [
+        {"type": "wall", "duration": 3, "images": ["w0.png", "w1.png", "w2.png"]},
+        {"type": "phone", "duration": 3, "images": ["p0.png"]},
+        {"type": "cards", "duration": 3, "items": ["Love this", "So <good>"]},
+        {"type": "ransom", "duration": 2.5, "title": "100%"},
+        {"type": "waveform", "duration": 3},
+    ]
+    html = sheet_html(pieces, 1080, 1920, {}, 14.5)
+    for name in ("w0.png", "w1.png", "w2.png", "p0.png"):
+        assert name in html
+    assert "So &lt;good&gt;" in html
+    assert "<svg" not in html
+
+
+def test_inset_paper_and_pull_out_moves():
+    zooms = mo.plan_effects([], [
+        {"start": 1, "duration": 2, "style": "inset", "image": "app.png", "scale": 0.1},
+        {"start": 4, "duration": 2, "style": "paper"},
+        {"start": 7, "duration": 2, "style": "pullout", "image": "app.png"},
+    ], 20)[1]
+    assert [(z["style"], z["scale"]) for z in zooms] == [("inset", 0.25), ("paper", 1.0), ("pullout", 1.0)]
+    assert mo.needs_mask({"zooms": [{"start": 1, "style": "paper"}]})
+    with pytest.raises(mo.MotionError, match="picture"):
+        mo.plan_effects([], [{"start": 1, "duration": 1, "style": "pullout"}], 20)
+    zooms[0]["_input"], zooms[2]["_input"] = 3, 4
+    pieces = [{"type": "waveform", "start": 4.5, "duration": 1.0, "layer": "behind"}]
+    graph, video, _ = mo.filter_graph(pieces, [], True, 20, mask_input=2, zooms=zooms, size=(360, 640), fps=25)
+    person = graph.index("[person]overlay")
+    # The inset: the app picture fills the frame and the speaker sits small on it.
+    assert person < graph.index("[ip0]overlay")
+    # Paper: a paper-coloured page, the behind piece laid again on it, then the speaker.
+    assert mo.PAPER in graph and "[s0r" in graph
+    # The pull-out shrinks the video from full frame to a card on the picture.
+    assert "[pub" in graph and "[puc" in graph and "zoompan" in graph
+    assert video == "[vout]"
+
+
+def test_request_checks_media_fields(client):
+    bad = client.post("/v1/video/motion", headers={"X-API-Key": API_KEY}, json={
+        "video_url": "https://example.com/v.mp4",
+        "pieces": [{"type": "wall", "start": 1, "images": ["not a url"] * 10}],
+    })
+    assert bad.status_code == 400

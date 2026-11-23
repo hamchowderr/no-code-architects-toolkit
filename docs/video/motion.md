@@ -33,7 +33,7 @@ The same mask draws outlines around the person (`outlines`): a thin hand-drawn l
 | `style.font` | font name | look's font | Any font installed on the toolkit or on Google Fonts |
 | `mask_url` | string | | The speaker's mask from `/v1/video/cutout`. Only used by behind pieces and outlines |
 | `outlines` | array, up to 50 | `[]` | Outlines around the person: `{start?, duration?, style?, color?, width?}`. `style` is `sketch` (default) or `sticker`. No `duration` runs to the end. `width` is a percent of the frame's short side (0.3 to 4; default 0.45 for sketch, 1.4 for sticker), `color` defaults to white |
-| `zooms` | array, up to 200 | `[]` | Camera moves: `{start, duration, style?, scale?, focus_y?}`. `style`: `punch` (default, a quick push in), `through` (a push into the face that speeds up and blurs at its end, for a cut; default scale 2.4), `dolly` (the room pushes in behind the speaker while they stay the same size) or `pop` (the video shrinks to a card on a dark, blurred room and the speaker breaks out over its top edge). `dolly` and `pop` need the speaker's mask: the room behind them is painted in from one still. `scale` 1 to 2.5 (default 1.3). `focus_y` is how far down the frame to zoom into, 0 (top) to 1 (bottom), default 0.35. Moves cannot overlap |
+| `zooms` | array, up to 200 | `[]` | Camera moves: `{start, duration, style?, scale?, focus_y?}`. `style`: `punch` (default, a quick push in), `through` (a push into the face that speeds up and blurs at its end, for a cut; default scale 2.4), `dolly` (the room pushes in behind the speaker while they stay the same size) `pop` (the video shrinks to a card on a dark, blurred room and the speaker breaks out over its top edge), `inset` (a picture from `image`, such as an app screen, fills the frame and the speaker stands small at its bottom; `scale` 0.25 to 1, default 0.55), `paper` (the room turns to plain paper behind the speaker, with behind pieces still showing) or `pullout` (the whole video pulls back from full frame to a card on the picture in `image`). `dolly`, `pop`, `inset` and `paper` need the speaker's mask: the room behind them is painted in from one still. `scale` 1 to 2.5 (default 1.3). `focus_y` is how far down the frame to zoom into, 0 (top) to 1 (bottom), default 0.35. Moves cannot overlap |
 | `sound_volume` | number, 0 to 2 | `1` | Scales every sound; `0` mutes them all |
 | `piece_sounds` | boolean | `true` | Whether pieces play their own sound |
 | `webhook_url` | string | | Send the answer here when done (recommended) |
@@ -41,7 +41,7 @@ The same mask draws outlines around the person (`outlines`): a thin hand-drawn l
 
 ### Pieces
 
-Each piece is `{type, start, duration?, title?, subtitle?, image?, items?, shape?, x?, y?, layer?, sound?}`. `start` is seconds into the video. `layer` is `"front"` (default) or `"behind"`. `duration` is kept between the type's shortest and longest and inside the video. `sound` picks another sound, or `null` for none.
+Each piece is `{type, start, duration?, title?, subtitle?, image?, images?, items?, shape?, x?, y?, layer?, sound?}`. `start` is seconds into the video. `layer` is `"front"` (default) or `"behind"`. `duration` is kept between the type's shortest and longest and inside the video. `sound` picks another sound, or `null` for none.
 
 | `type` | `title` | `subtitle` | Length (default, shortest to longest) | Sound |
 |---|---|---|---|---|
@@ -58,6 +58,12 @@ Each piece is `{type, start, duration?, title?, subtitle?, image?, items?, shape
 | `graph` | Pill at the end of the line, such as `10X` | | 3.5 s (2 to 10). A thin line in the accent colour with a soft glow under it, creeping then shooting up. `items`: up to 6 labels along the top (default `JAN` to `JUN`) | riser |
 | `doodle` | | | 2.5 s (1 s to the whole video). `shape`: `crown`, `star`, `heart`, `arrow`, `burst` or `circle`. `x`, `y` place its centre in percent; behind the speaker with a mask and no place given, it goes just above their head | pop |
 | `checklist` | Small heading | | 4 s (2 to 12). A dark glass card with a count (`1 of 3`) and a progress bar; `items`: up to 6 lines, each typed in and ticked in turn while the rest wait as grey bars | tick |
+| `cards` | | | 3 s (1.5 to 10). `items`: up to 6 short lines, such as comments, shown as white cards that pop in down the sides | pop |
+| `wall` | | | 3 s (1.5 to 10). `images`: up to 9 pictures (links) that land one by one as a wall of tiles; put it behind the speaker | pop |
+| `phone` | | | 3 s (1.5 to 10). `images`: 1 picture shown on a phone that slides up | slide |
+| `orbit` | | | 3.5 s (2 to 10). `images`: up to 6 pictures that circle the speaker, passing behind and in front of them (needs the mask) | whoosh |
+| `ransom` | Short words, such as `100%` | | 2.5 s (1 to 8). Cut-out letters, each on its own paper scrap | click |
+| `waveform` | | | 3 s (1 to 10). A sound wave in the accent colour across the frame | none |
 
 Sounds: `click`, `ding`, `impact`, `pop`, `riser`, `slide`, `thud`, `tick`, `whoosh`.
 

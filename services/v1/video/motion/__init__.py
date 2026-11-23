@@ -44,7 +44,7 @@ import time
 from ..cutout import CutoutError, head_top
 from ..cutout import probe as probe_video
 from . import sketch
-from .pieces import NEEDS_TITLE, PIECES, big_text_size, sheet_html
+from .pieces import IMAGE_PIECES, NEEDS_TITLE, PIECES, big_text_size, sheet_html
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,15 @@ ZOOM_RAMP = 0.12  # seconds a punch-in takes to reach its size
 # Camera moves in "zooms": punch (a quick push in), through (an accelerating push into the
 # face with a blur, for a cut), dolly (the room moves in while the speaker stays the same
 # size) and pop (the video shrinks to a card and the speaker pops out over its top edge).
-ZOOM_STYLES = ("punch", "through", "dolly", "pop")
-MASK_ZOOMS = ("dolly", "pop")
+# inset (the speaker, smaller, standing in front of a picture such as an app screen), paper
+# (a paper collage: the speaker as a cut-out sticker on paper) and pullout (the camera pulls
+# back to show the video as a card on a picture, no mask needed).
+ZOOM_STYLES = ("punch", "through", "dolly", "pop", "inset", "paper", "pullout")
+MASK_ZOOMS = ("dolly", "pop", "inset", "paper")
+IMAGE_ZOOMS = ("inset", "pullout")
+STAGES = {"pop": 1, "inset": 1, "paper": 2}  # moves that redraw the speaker, and the masks each uses
+PAPER = "0xefe8dc"
+PULL_CARD = 0.62  # the video's size at the end of a pull-out
 POP_CARD = 0.72  # the card's size in a frame pop
 POP_TOP = 0.15  # where the card's top sits, as a share of the frame's height
 POP_OVER = 0.05  # how far the head rises over the card's top edge
@@ -116,8 +123,18 @@ def plan(pieces, sounds, duration, sound_volume=1.0, piece_sounds=True):
             raise MotionError(f"A {kind.replace('_', ' ')} piece needs its words.")
         if kind == "checklist" and not (raw.get("items") or str(raw.get("title") or "").strip()):
             raise MotionError("A checklist piece needs its items.")
+        if kind == "cards" and not (raw.get("items") or str(raw.get("title") or "").strip()):
+            raise MotionError("A cards piece needs the words for its cards.")
+        if kind in IMAGE_PIECES and not raw.get("images"):
+            raise MotionError(f"A {kind} piece needs its pictures.")
+        if kind in IMAGE_PIECES and len(raw["images"]) > IMAGE_PIECES[kind]:
+            raise MotionError(f"A {kind} piece takes at most {IMAGE_PIECES[kind]} pictures.")
         piece = dict(raw, start=round(start, 3), duration=round(length, 3), layer=raw.get("layer") or "front")
         placed.append(piece)
+        if kind == "orbit":
+            # Laid twice: the cards behind the speaker and the cards in front.
+            piece["layer"] = "behind"
+            placed.append(dict(piece, layer="front", sound=None))
         sound = raw.get("sound", default_sound) if piece_sounds else raw.get("sound")
         if sound:
             cues.append({"sound": sound, "at": start, "volume": 1.0})
@@ -166,11 +183,15 @@ def plan_effects(outlines, zooms, duration):
         start, end = window(raw)
         if end - start >= 0.1:
             style = raw.get("style") if raw.get("style") in ZOOM_STYLES else "punch"
-            default = {"punch": 1.3, "through": 2.4, "dolly": 1.3, "pop": 1.0}[style]
+            default = {"punch": 1.3, "through": 2.4, "dolly": 1.3, "pop": 1.0, "inset": 0.55, "paper": 1.0, "pullout": 1.0}[style]
+            if style in IMAGE_ZOOMS and not raw.get("image"):
+                raise MotionError(f"A {style} move needs the link of the picture it shows.")
             kept_zooms.append({
                 "start": start, "end": end, "style": style,
-                "scale": max(1.0 if style == "pop" else 1.02, min(2.5, float(raw.get("scale", default)))),
+                "scale": (max(0.25, min(1.0, float(raw.get("scale", default)))) if style == "inset"
+                          else max(1.0 if style in ("pop", "paper", "pullout") else 1.02, min(2.5, float(raw.get("scale", default))))),
                 "focus_y": max(0.0, min(1.0, float(raw.get("focus_y", 0.35)))),
+                **({"image": raw["image"]} if style in IMAGE_ZOOMS else {}),
             })
     for earlier, later in zip(sorted(kept_zooms, key=lambda z: z["start"]), sorted(kept_zooms, key=lambda z: z["start"])[1:]):
         if later["start"] < earlier["end"]:
@@ -215,32 +236,49 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
     width, height = size or (0, 0)
     behind = [i for i, p in enumerate(pieces) if p.get("layer") == "behind"]
     moves = [z for z in zooms if z.get("style") in MASK_ZOOMS]
-    zooms = [z for z in zooms if z.get("style") not in MASK_ZOOMS]
+    pulls = [z for z in zooms if z.get("style") == "pullout"]
+    zooms = [z for z in zooms if z.get("style") not in MASK_ZOOMS and z.get("style") != "pullout"]
     layered = mask_input is not None and (behind or outlines or moves)
     if mask_input is None:
         moves = []
-    if pieces or outlines or zooms or moves:
+    if pieces or outlines or zooms or moves or pulls:
         # Even sides, so the result can be H.264.
         crop = "[0:v]crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0,setsar=1"
-        parts.append(crop + (",split=2[base][keep]" if layered else "[base]"))
+        copies = ["[base]"] + (["[keep]"] if layered else []) + [f"[pu{k}]" for k in range(len(pulls))]
+        parts.append(crop + (f",split={len(copies)}{''.join(copies)}" if len(copies) > 1 else "[base]"))
         video = "[base]"
+        stages = [m for m in moves if m["style"] in STAGES]
         if layered:
             stickers = [o for o in outlines if o["style"] == "sticker"]
-            pops = [m for m in moves if m["style"] == "pop"]
-            masks = 1 + len(stickers) + len(pops)
+            next_mask = 1 + len(stickers)
+            for mv in stages:  # each stage move takes its own copies of the mask
+                mv["_masks"] = list(range(next_mask, next_mask + STAGES[mv["style"]]))
+                next_mask += STAGES[mv["style"]]
+            masks = next_mask
             labels = "".join(f"[m{i}]" for i in range(masks))
             parts.append(
                 f"[{mask_input}:v]format=gray,scale={width}:{height}:flags=bicubic,setsar=1"
                 + (f",split={masks}{labels}" if masks > 1 else "[m0]")
             )
-            if pops:
-                parts.append(f"[keep]split={1 + len(pops)}[keep0]" + "".join(f"[keep{k + 1}]" for k in range(len(pops))))
+            if stages:
+                parts.append(f"[keep]split={1 + len(stages)}[keep0]" + "".join(f"[keep{k + 1}]" for k in range(len(stages))))
                 parts.append("[keep0][m0]alphamerge[person]")
             else:
                 parts.append("[keep][m0]alphamerge[person]")
 
+        # A behind piece showing during a paper or inset move is laid again on that move's
+        # background, so it stays behind the speaker there too.
+        backdrops = [m for m in moves if m["style"] in ("paper", "inset")] if layered else []
+        again = {
+            i: [m for m in backdrops if pieces[i]["start"] < m["end"] and m["start"] < pieces[i]["start"] + pieces[i]["duration"]]
+            for i in behind
+        }
         if pieces:
-            parts.append(f"[1:v]split={len(pieces)}" + "".join(f"[s{i}]" for i in range(len(pieces))) if len(pieces) > 1 else "[1:v]null[s0]")
+            labels = []
+            for i in range(len(pieces)):
+                labels.append(f"[s{i}]")
+                labels += [f"[s{i}r{n}]" for n in range(len(again.get(i, [])))]
+            parts.append(f"[1:v]split={len(labels)}" + "".join(labels) if len(labels) > 1 else "[1:v]null[s0]")
         offsets = []
         offset = 0.0
         for piece in pieces:
@@ -261,6 +299,18 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
             video = out
 
         front = [i for i in range(len(pieces)) if i not in behind] if layered else list(range(len(pieces)))
+        def relay(mv, a, b):
+            nonlocal video
+            for i in behind:
+                if mv in again.get(i, []):
+                    n = again[i].index(mv)
+                    piece, off = pieces[i], offsets[i]
+                    parts.append(
+                        f"[s{i}r{n}]trim=start={off:.3f}:end={off + piece['duration']:.3f},setpts=PTS-STARTPTS+{piece['start']:.3f}/TB[q{i}r{n}]"
+                    )
+                    lo, hi = max(a, piece["start"]), min(b, piece["start"] + piece["duration"])
+                    over(f"[q{i}r{n}]", lo, hi)
+
         def over(label, start, end, extra=""):
             nonlocal video
             out = f"[v{step[0]}]"
@@ -310,28 +360,77 @@ def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outli
             step[0] += 1
             parts.append(f"{video}[person]overlay=format=auto{out}")
             video = out
-            # Frame pops: a dark, blurred room; the room as a smaller card; the speaker,
-            # bigger than the card, standing on its bottom edge so they break out of it.
-            for k, mv in enumerate(pops):
-                a, b = mv["start"], mv["end"]
-                cw, ch = int(width * POP_CARD) // 2 * 2, int(height * POP_CARD) // 2 * 2
-                edge = max(2, int(min(width, height) * 0.006))
-                cx, cy = (width - cw) // 2, int(height * POP_TOP)
-                # The speaker is scaled so their head rises POP_OVER over the card's top and
-                # their body still reaches the bottom of the frame.
-                head = mv.get("_head", 0.2)
-                grow = max(1.0, (1 - POP_TOP + POP_OVER) / max(0.3, 1 - head))
-                pw, ph = int(width * grow) // 2 * 2, int(height * grow) // 2 * 2
-                py = height - ph
-                parts.append(f"[{mv['_input']}:v]scale={width}:{height},setsar=1,setpts=PTS-STARTPTS+{a:.3f}/TB,split=2[pb{k}][pc{k}]")
-                parts.append(f"[pb{k}]gblur=sigma={min(width, height) / 30:.1f},eq=brightness=-0.28:saturation=0.8[pbg{k}]")
-                parts.append(
-                    f"[pc{k}]scale={cw - 2 * edge}:{ch - 2 * edge},pad={cw}:{ch}:{edge}:{edge}:color=0x1c1d21[pcard{k}]"
-                )
-                parts.append(f"[keep{k + 1}][m{1 + len(stickers) + k}]alphamerge,scale={pw}:{ph}[pp{k}]")
-                over(f"[pbg{k}]", a, b)
-                over(f"[pcard{k}]", a, b, f":x={cx}:y={cy}")
-                over(f"[pp{k}]", a, b, f":x={(width - pw) // 2}:y={py}")
+            for k, mv in enumerate(stages):
+                a, b, ln = mv["start"], mv["end"], mv["end"] - mv["start"]
+                keep = f"[keep{k + 1}]"
+                if mv["style"] == "pop":
+                    # A dark, blurred room; the room as a smaller card; the speaker, bigger
+                    # than the card, standing on the frame's bottom so they break out of it.
+                    cw, ch = int(width * POP_CARD) // 2 * 2, int(height * POP_CARD) // 2 * 2
+                    edge = max(2, int(min(width, height) * 0.006))
+                    cx, cy = (width - cw) // 2, int(height * POP_TOP)
+                    head = mv.get("_head", 0.2)
+                    grow = max(1.0, (1 - POP_TOP + POP_OVER) / max(0.3, 1 - head))
+                    pw, ph = int(width * grow) // 2 * 2, int(height * grow) // 2 * 2
+                    parts.append(f"[{mv['_input']}:v]scale={width}:{height},setsar=1,setpts=PTS-STARTPTS+{a:.3f}/TB,split=2[pb{k}][pc{k}]")
+                    parts.append(f"[pb{k}]gblur=sigma={min(width, height) / 30:.1f},eq=brightness=-0.28:saturation=0.8[pbg{k}]")
+                    parts.append(f"[pc{k}]scale={cw - 2 * edge}:{ch - 2 * edge},pad={cw}:{ch}:{edge}:{edge}:color=0x1c1d21[pcard{k}]")
+                    parts.append(f"{keep}[m{mv['_masks'][0]}]alphamerge,scale={pw}:{ph}[pp{k}]")
+                    over(f"[pbg{k}]", a, b)
+                    over(f"[pcard{k}]", a, b, f":x={cx}:y={cy}")
+                    over(f"[pp{k}]", a, b, f":x={(width - pw) // 2}:y={height - ph}")
+                elif mv["style"] == "inset":
+                    # A picture (such as an app screen) fills the frame; the speaker, smaller,
+                    # stands at its bottom.
+                    pw, ph = int(width * mv["scale"]) // 2 * 2, int(height * mv["scale"]) // 2 * 2
+                    parts.append(
+                        f"[{mv['_input']}:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},"
+                        f"setsar=1,setpts=PTS-STARTPTS+{a:.3f}/TB[ib{k}]"
+                    )
+                    parts.append(f"{keep}[m{mv['_masks'][0]}]alphamerge,scale={pw}:{ph}[ip{k}]")
+                    over(f"[ib{k}]", a, b)
+                    relay(mv, a, b)
+                    over(f"[ip{k}]", a, b, f":x={(width - pw) // 2}:y={height - ph}")
+                else:  # paper
+                    # Paper, the behind pieces, the speaker's sticker edge and its shadow, then the speaker.
+                    px = outline_px(2.4, width, height)
+                    parts.append(
+                        f"color=c={PAPER}:s={width}x{height}:r={fps:.6f}:d={ln:.3f},noise=alls=9:allf=u,"
+                        f"setpts=PTS-STARTPTS+{a:.3f}/TB[pa{k}]"
+                    )
+                    parts.append(
+                        f"[m{mv['_masks'][0]}]gblur=sigma={px / 2:.2f},lut=c0='if(gt(val,6),255,0)',gblur=sigma=1.2,split=2[ra{k}][rs{k}]"
+                    )
+                    parts.append(f"color=c=white:s={width}x{height}:r={fps:.6f}[rw{k}];[rw{k}][ra{k}]alphamerge[ring{k}x]")
+                    parts.append(
+                        f"[rs{k}]gblur=sigma={px * 1.5:.1f},lut=c0='val*0.45'[rsa{k}];color=c=black:s={width}x{height}:r={fps:.6f}[rk{k}];"
+                        f"[rk{k}][rsa{k}]alphamerge[shadow{k}]"
+                    )
+                    parts.append(f"{keep}[m{mv['_masks'][1]}]alphamerge[pperson{k}]")
+                    over(f"[pa{k}]", a, b)
+                    relay(mv, a, b)
+                    over(f"[shadow{k}]", a, b, f":x={int(px * 0.6)}:y={int(px * 1.1)}")
+                    over(f"[ring{k}x]", a, b)
+                    over(f"[pperson{k}]", a, b)
+        # Pull-outs: the camera pulls back from the video to show it as a card on a picture.
+        for k, mv in enumerate(pulls):
+            a, b = mv["start"], mv["end"]
+            cw, ch = int(width * PULL_CARD) // 2 * 2, int(height * PULL_CARD) // 2 * 2
+            edge = max(2, int(min(width, height) * 0.006))
+            cx, cy = int(width * 0.3), int(height * 0.12)
+            cx = min(cx, width - cw)
+            z0 = width / cw
+            ease = f"(1-pow(1-min(1,it/0.7),3))"
+            parts.append(f"[pu{k}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS,scale={cw - 2 * edge}:{ch - 2 * edge},pad={cw}:{ch}:{edge}:{edge}:color=0xffffff[puc{k}]")
+            parts.append(
+                f"[{mv['_input']}:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[pub{k}]"
+            )
+            parts.append(
+                f"[pub{k}][puc{k}]overlay=x={cx}:y={cy}:eof_action=pass,"
+                f"zoompan=z='{z0:.4f}-{z0 - 1:.4f}*{ease}':x='{cx}*(zoom-1)/{z0 - 1:.4f}':y='{cy}*(zoom-1)/{z0 - 1:.4f}':d=1:s={width}x{height}:fps={fps:.6f},"
+                f"setpts=PTS-STARTPTS+{a:.3f}/TB[pz{k}]"
+            )
+            over(f"[pz{k}]", a, b)
         for i in front:
             lay(i)
         if zooms:
@@ -497,7 +596,20 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
 
     # Logos are fetched once and handed to the sheet as local files.
     image_files = {}
+    fetched = {}
+
+    def local_image(url, name):
+        if url not in fetched:
+            if fetch_image is None:
+                raise MotionError("Pictures cannot be fetched here.")
+            local = fetch_image(url, work_dir)
+            fetched[url] = f"{name}{os.path.splitext(local)[1] or '.png'}"
+            image_files[local] = fetched[url]
+        return fetched[url]
+
     for i, piece in enumerate(pieces):
+        if piece.get("images"):
+            piece["images"] = [local_image(u, f"image_{i}_{k}") for k, u in enumerate(piece["images"])]
         if piece["type"] == "logo":
             if fetch_image is None:
                 raise MotionError("Logos cannot be fetched here.")
@@ -525,14 +637,21 @@ def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
                           color=_hex_rgb(ol["color"]), line=ol["width"])
             ol["_input"] = mask_input + 1 + k
             inputs += ["-i", drawn]
-        for k, mv in enumerate(moves):
-            # The room without the speaker, as a still the move plays over.
-            still = os.path.join(work_dir, f"room_{k}.png")
+    # Camera moves that play over a still: the room without the speaker, or a picture.
+    for mv in zooms:
+        if mv["style"] in ("dolly", "pop"):
+            still = os.path.join(work_dir, f"room_{len(inputs)}.png")
             clean_plate(src, mask, mv["start"], still)
             spot = head_top(mask, mv["start"] + 0.2, width, height)
             mv["_head"] = spot[1] / 100 if spot else 0.2
-            mv["_input"] = mask_input + 1 + sum(1 for o in outlines if o["style"] == "sketch") + k
-            inputs += ["-loop", "1", "-framerate", f"{info['fps']:.6f}", "-t", f"{mv['end'] - mv['start']:.3f}", "-i", still]
+        elif mv["style"] in IMAGE_ZOOMS:
+            if fetch_image is None:
+                raise MotionError("Pictures cannot be fetched here.")
+            still = fetch_image(mv["image"], work_dir)
+        else:
+            continue
+        mv["_input"] = inputs.count("-i")
+        inputs += ["-loop", "1", "-framerate", f"{info['fps']:.6f}", "-t", f"{mv['end'] - mv['start']:.3f}", "-i", still]
 
     graph, video, audio = filter_graph(
         pieces, cues, info["has_audio"], info["duration"],
