@@ -47,10 +47,21 @@ PIECES = {
     "doodle": (2.5, "pop", 1.0, 3600.0),
     # Sits in front, at the bottom.
     "checklist": (4.0, "tick", 2.0, 12.0),
+    # Media, mostly behind the speaker: comment cards, a wall of pictures, a phone showing a
+    # picture, pictures orbiting the speaker, cut-out letters, and a scribbled sound wave.
+    "cards": (3.0, "pop", 1.5, 10.0),
+    "wall": (3.0, "pop", 1.5, 10.0),
+    "phone": (3.0, "slide", 1.5, 10.0),
+    "orbit": (3.5, "whoosh", 2.0, 10.0),
+    "ransom": (2.5, "click", 1.0, 8.0),
+    "waveform": (3.0, None, 1.0, 10.0),
 }
 
+# Pieces that show the pictures in "images", and how many they take.
+IMAGE_PIECES = {"wall": 9, "phone": 1, "orbit": 6}
+
 # Pieces that need words in "title".
-NEEDS_TITLE = ("lower_third", "title", "keyword", "stat", "chapter", "follow", "quote", "big_text")
+NEEDS_TITLE = ("lower_third", "title", "keyword", "stat", "chapter", "follow", "quote", "big_text", "ransom")
 
 # Hand-drawn doodles: SVG paths on a 100 x 100 box, drawn on and then wobbling.
 DOODLES = {
@@ -84,6 +95,12 @@ def _counter(title):
     return match.group(1), int(match.group(2)), match.group(3)
 
 
+MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN"]
+# Comment cards sit around the edges, away from the face: (left %, top %, tilt deg, dark?)
+CARD_SPOTS = [(3, 7, -3, False), (-3, 9, 2, True), (2, 26, 2, True), (-2, 30, -2, False), (4, 46, -1, False), (-4, 50, 3, True)]  # negative: from the right
+# Ransom letters: (paper, ink, font) per letter, cycled.
+RANSOM = [("#ffffff", "#111111", "Libre Baskerville"), ("#e8382f", "#ffffff", "Arial Black"), ("#111111", "#ffffff", "Roboto"),
+          ("#f6d34a", "#111111", "Oswald"), ("#ffffff", "#e8382f", "Luckiest Guy"), ("#3b5bdb", "#ffffff", "Libre Baskerville")]
 TICK = '<path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#121316" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>'
 
 
@@ -95,8 +112,9 @@ def svg_image(body, view="0 0 100 100", fit="xMidYMid meet", cls=""):
 
 
 def big_text_size(words, aspect):
-    """Font size of a big_text piece in --u units: the longer the words, the smaller."""
-    return min(40.0, 135.0 * aspect / max(3, len(words.strip())))
+    """Font size of a big_text piece in --u units: the word fills the frame's width like a
+    magazine's name across its cover, so the longer the word, the smaller."""
+    return min(46.0, 128.0 * aspect / max(3, len(words.strip())))
 
 
 def piece_html(index, piece, t0):
@@ -160,55 +178,152 @@ def piece_html(index, piece, t0):
         # Fills the frame's width: the longer the word, the smaller it is drawn.
         size = big_text_size(words, piece.get("_aspect", 1.0))
         top = f"top:{float(piece['y']):.1f}%;" if piece.get("y") is not None else ""
-        inner = f'<div class="bt" style="--fs:{size:.2f};{top}">'
+        glass = " bt-glass" if piece.get("look") == "glass" else ""
+        inner = f'<div class="bt{glass}" style="--fs:{size:.2f};{top}">'
         if sub:
             inner += f'<div class="bt-kick a-up">{sub}</div>'
-        inner += f'<div class="bt-word a-rise">{title}</div></div>'
+        inner += f'<div class="bt-word a-rise"><span>{title}</span></div></div>'
+        lines = [esc(x) for x in (piece.get("items") or [])][:4]
+        if lines:
+            # Cover lines down the sides, like a magazine's.
+            inner += '<div class="bt-lines">' + "".join(
+                f'<div class="bt-line bt-line-{"l" if i % 2 == 0 else "r"} a-up" style="top:{36 + (i // 2) * 16}%;'
+                f'animation-delay:{0.4 + i * 0.12:.2f}s,calc(var(--d) - .34s)">{line}</div>'
+                for i, line in enumerate(lines)
+            ) + "</div>"
     elif kind == "graph":
-        labels = [esc(x) for x in (piece.get("items") or [])][:6]
+        # Months along the top, and a thin line that creeps along, then shoots up to the
+        # tag: the "growth chart behind my head" look.
+        labels = [esc(x) for x in (piece.get("items") or [])][:6] or MONTHS
         accent = piece.get("_accent", "#46e5b7")
-        points = []
-        for i in range(7):  # rises slowly, then shoots up
-            x = 6 + i * 88 / 6
-            y = 92 - 84 * (i / 6) ** 2.2
-            points.append(f"{x:.1f},{y:.1f}")
-        line = (
-            f'<polyline points="{" ".join(points)}" fill="none" stroke="{accent}" stroke-width="2.2" '
+        pts = []
+        for i in range(13):
+            x = 2 + i * 96 / 12
+            y = 88 - 80 * (i / 12) ** 2.6
+            pts.append((x, y))
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        area = f"2,100 {line} {pts[-1][0]:.1f},100"
+        body = (
+            f'<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{accent}" stop-opacity=".32"/>'
+            f'<stop offset="1" stop-color="{accent}" stop-opacity="0"/></linearGradient></defs>'
+            f'<polygon points="{area}" fill="url(#g)"/>'
+            f'<polyline points="{line}" fill="none" stroke="{accent}" stroke-width="2.4" vector-effect="non-scaling-stroke" '
             'stroke-linecap="round" stroke-linejoin="round"/>'
         )
-        inner = '<div class="gr">' + svg_image(line, fit="none", cls="gr-line a-wipe2")
+        inner = '<div class="gr"><div class="gr-labels">' + "".join(
+            f'<span class="a-up" style="animation-delay:{0.05 + i * 0.07:.2f}s,calc(var(--d) - .34s)">{lab}</span>'
+            for i, lab in enumerate(labels)
+        ) + "</div>"
+        inner += '<div class="gr-plot">' + svg_image(body, fit="none", cls="gr-line a-wipe2")
         if title:
             inner += f'<div class="gr-tag a-pop2">{title}</div>'
-        if labels:
-            inner += '<div class="gr-labels">' + "".join(
-                f'<span class="a-up" style="animation-delay:{0.15 + i * 0.12:.2f}s,calc(var(--d) - .34s)">{lab}</span>'
-                for i, lab in enumerate(labels)
-            ) + "</div>"
-        inner += "</div>"
+        inner += "</div></div>"
     elif kind == "doodle":
         shape = piece.get("shape") if piece.get("shape") in DOODLES else "star"
         x = min(95.0, max(5.0, float(piece.get("x", 50))))
         y = min(95.0, max(5.0, float(piece.get("y", 12))))
         path = (
-            f'<path d="{DOODLES[shape]}" fill="none" stroke="{piece.get("_accent", "#46e5b7")}" stroke-width="6" '
+            f'<path d="{DOODLES[shape]}" fill="none" stroke="{piece.get("_accent", "#46e5b7")}" stroke-width="4" '
             'stroke-linecap="round" stroke-linejoin="round"/>'
         )
         inner = f'<div class="dd" style="left:{x:.1f}%;top:{y:.1f}%"><div class="dd-boil">'
         inner += svg_image(path, view="-5 -5 110 110", cls="a-scribble") + "</div></div>"
     elif kind == "checklist":
-        items = [esc(x) for x in (piece.get("items") or [])][:6] or [title]
-        step = min(0.7, max(0.25, (d - 1.2) / max(1, len(items))))
-        inner = '<div class="ck a-card">'
-        if title and piece.get("items"):
-            inner += f'<div class="ck-title">{title}</div>'
-        for i, item in enumerate(items):
+        # A dark glass card: a header with a count, round boxes, and each line typed in
+        # and ticked in turn while the lines still to come wait as grey bars.
+        raw_items = [x for x in (piece.get("items") or [])][:6] or [piece.get("title") or ""]
+        heading = title if piece.get("items") else ""
+        step = min(0.9, max(0.3, (d - 1.0) / max(1, len(raw_items))))
+        rows, ticks = [], []
+        for i, item in enumerate(raw_items):
             at = 0.35 + i * step
+            typing = min(step * 0.7, 0.03 * len(item) + 0.1)
+            ticks.append(at + typing)
+            rows.append(
+                f'<div class="ck-row" style="--at:{at:.2f}s;--type:{typing:.2f}s;--chars:{max(1, len(item))}">'
+                '<span class="ck-box">' + svg_image(TICK, view="0 0 24 24", cls="ck-mark") + "</span>"
+                f'<span class="ck-slot"><span class="ck-skel"></span><span class="ck-text">{esc(item)}</span></span></div>'
+            )
+        total = len(raw_items)
+        # "0 of 3", "1 of 3"... each shown from one tick to the next.
+        edges = [0.0, *ticks, 999.0]
+        count = "".join(
+            f'<span class="ck-n" style="--on:{edges[k]:.2f}s;--len:{edges[k + 1] - edges[k]:.2f}s">{k} of {total}</span>'
+            for k in range(total + 1)
+        )
+        bar = "".join(f'<span class="ck-seg" style="--on:{t:.2f}s"></span>' for t in ticks)
+        inner = f'<div class="ck a-card"><div class="ck-head"><span class="ck-title">{heading}</span><span class="ck-count">{count}</span></div>'
+        inner += f'<div class="ck-bar">{bar}</div>' + "".join(rows) + "</div>"
+    elif kind == "cards":
+        # Comment cards, quotes or headlines popping up around the speaker.
+        items = [esc(x) for x in (piece.get("items") or [])][:6] or [title]
+        inner = '<div class="cw">'
+        for i, item in enumerate(items):
+            x, y, tilt, dark = CARD_SPOTS[i % len(CARD_SPOTS)]
             inner += (
-                f'<div class="ck-row" style="--at:{at:.2f}s"><span class="ck-box">'
-                + svg_image(TICK, view="0 0 24 24", cls="ck-mark")
-                + f'</span><span class="ck-text">{item}</span></div>'
+                f'<div class="cw-card{" cw-dark" if dark else ""}" style="{"left" if x >= 0 else "right"}:{abs(x)}%;top:{y}%;--tilt:{tilt}deg;'
+                f'animation-delay:{0.08 + i * 0.16:.2f}s,calc(var(--d) - .3s)"><div class="cw-who"></div>{item}</div>'
             )
         inner += "</div>"
+    elif kind == "wall":
+        # A wall of pictures (frames of other videos) filling in behind the speaker.
+        images = piece.get("images") or []
+        cols = 3
+        inner = '<div class="pw">'
+        for i, src in enumerate(images[:9]):
+            tilt = (-2.5, 1.5, -1, 2, -1.5, 1, 2.5, -2, 0.5)[i]
+            inner += (
+                f'<div class="pw-tile" style="grid-column:{i % cols + 1};grid-row:{i // cols + 1};--tilt:{tilt}deg;'
+                f'animation-delay:{0.05 + i * 0.09:.2f}s,calc(var(--d) - .3s)"><img src="{esc(src)}" alt=""></div>'
+            )
+        inner += "</div>"
+    elif kind == "phone":
+        src = (piece.get("images") or [""])[0]
+        x = min(70.0, max(2.0, float(piece.get("x", 5))))
+        y = min(70.0, max(2.0, float(piece.get("y", 6))))
+        inner = (
+            f'<div class="ph" style="left:{x:.1f}%;top:{y:.1f}%"><div class="ph-screen"><img src="{esc(src)}" alt=""></div>'
+            '<div class="ph-notch"></div></div>'
+        )
+    elif kind == "orbit":
+        # Pictures circling the speaker. The same piece is laid twice, behind and in front;
+        # each half only shows the cards on its side of the circle (CSS cos()).
+        images = (piece.get("images") or [])[:6]
+        side = "back" if piece.get("layer") == "behind" else "front"
+        n = max(1, len(images))
+        inner = f'<div class="ob ob-{side}">'
+        for i, src in enumerate(images):
+            inner += (
+                f'<div class="ob-card" style="--a0:{i * 360 / n:.1f}deg"><img src="{esc(src)}" alt=""></div>'
+            )
+        inner += "</div>"
+    elif kind == "ransom":
+        # Cut-out letters, each from a different magazine.
+        words = piece.get("title") or ""
+        inner = '<div class="rn">'
+        k = 0
+        for ch in words:
+            if ch == " ":
+                inner += '<span class="rn-gap"></span>'
+                continue
+            paper, ink, font = RANSOM[(k * 7 + len(words)) % len(RANSOM)]
+            tilt = (-6, 4, -3, 7, -5, 3, 6, -4)[k % 8]
+            inner += (
+                f'<span class="rn-l" style="background:{paper};color:{ink};font-family:\'{font}\';--tilt:{tilt}deg;'
+                f'animation-delay:{0.04 + k * 0.07:.2f}s,calc(var(--d) - .3s)">{esc(ch)}</span>'
+            )
+            k += 1
+        inner += "</div>"
+    elif kind == "waveform":
+        # A scribbled sound wave, drawn left to right like a crayon.
+        accent = piece.get("_accent", "#46e5b7")
+        y = min(90.0, max(5.0, float(piece.get("y", 18))))
+        pts = []
+        for i in range(90):
+            amp = 30 + 26 * abs(((i * 37) % 23) / 23 - .5) * 2
+            pts.append(f"{i * 100 / 89:.2f},{50 + (amp if i % 2 else -amp):.1f}")
+        body = f'<polyline points="{" ".join(pts)}" fill="none" stroke="{accent}" stroke-width="1.6" stroke-linejoin="round"/>'
+        inner = f'<div class="wf" style="top:{y:.1f}%">' + svg_image(body, fit="none", cls="wf-line a-wipe2") + "</div>"
     else:  # validated before this point
         raise ValueError(f"Unknown piece type: {kind}")
     return f"<div {clip}>{inner}</div>"
@@ -339,36 +454,94 @@ html,body{overflow:hidden;background:transparent}
 /* big text, made to sit behind the speaker */
 .a-scribble{animation:scribble .6s steps(6) calc(var(--t0) + .05s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
 @keyframes scribble{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
-.a-wipe2{animation:reveal 1s cubic-bezier(.5,0,.2,1) calc(var(--t0) + .05s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
 @keyframes reveal{from{clip-path:inset(-10% 100% -10% -10%)}to{clip-path:inset(-10% -10% -10% -10%)}}
-.a-pop2{animation:pop .45s cubic-bezier(.2,1.5,.4,1) calc(var(--t0) + .95s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
 @keyframes boil{0%{transform:rotate(-3deg) scale(1)}33%{transform:rotate(2deg) scale(1.04)}66%{transform:rotate(-1deg) scale(.98)}100%{transform:rotate(3deg) scale(1.02)}}
 @keyframes tick{from{background:transparent}to{background:var(--accent);border-color:var(--accent)}}
-.bt{position:absolute;left:0;right:0;top:9%;display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*1)}
-.tall .bt{top:11%}
-.bt-kick{font-weight:700;font-size:calc(var(--u)*2.6);letter-spacing:.2em;text-transform:uppercase}
-.bt-word{font-weight:900;font-size:calc(var(--u)*var(--fs));line-height:.9;letter-spacing:-.02em;text-transform:uppercase;white-space:nowrap;color:var(--text);text-shadow:0 calc(var(--u)*.4) calc(var(--u)*2) rgba(0,0,0,.35),var(--glow,0 0 0 transparent)}
-.look-clean .bt-word{color:rgba(255,255,255,.78);-webkit-text-stroke:calc(var(--u)*.15) rgba(255,255,255,.9);text-shadow:0 calc(var(--u)*.6) calc(var(--u)*3) rgba(0,0,0,.25)}
-.look-editorial .bt-word{font-family:"Libre Baskerville",serif;font-weight:700;letter-spacing:-.04em}
+.bt{position:absolute;left:0;right:0;top:4%;display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*.6)}
+.bt-kick{font-weight:600;font-size:calc(var(--u)*2.4);letter-spacing:.32em;text-transform:uppercase;text-shadow:0 0 calc(var(--u)*1.5) rgba(0,0,0,.35)}
+/* A magazine name: a high-contrast serif in white, set tight and stretched, with no box. */
+.bt-word{font-family:"Playfair Display","Libre Baskerville",serif;font-weight:400;font-size:calc(var(--u)*var(--fs));line-height:.86;letter-spacing:-.035em;text-transform:uppercase;white-space:nowrap;color:var(--text);text-shadow:0 calc(var(--u)*.2) calc(var(--u)*1.6) rgba(0,0,0,.18)}
+.bt-word span{display:inline-block;transform:scaleY(1.45);transform-origin:50% 0}
+.look-bold .bt-word,.look-neon .bt-word{font-weight:400}
+/* Glass: heavy, wide letters in bevelled chrome with a dark edge and a little depth. */
+.bt-glass .bt-word{font-family:"Arial Black","Roboto",sans-serif;font-weight:900;letter-spacing:.02em;font-size:calc(var(--u)*var(--fs)*.84);text-shadow:none}
+.bt-glass .bt-word span{transform:none;color:transparent;background:linear-gradient(180deg,#ffffff 0%,#e6e9ee 30%,#9aa1ab 48%,#5d636c 52%,#dfe3e8 70%,#b8bec6 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke:calc(var(--u)*.22) rgba(30,33,40,.9);filter:drop-shadow(0 calc(var(--u)*.35) 0 #6b717a) drop-shadow(0 calc(var(--u)*.35) 0 #3c4048) drop-shadow(0 calc(var(--u)*1) calc(var(--u)*1.4) rgba(0,0,0,.4))}
 
 /* graph rising behind the speaker */
-.gr{position:absolute;left:var(--side);right:var(--side);top:8%;height:38%}
-.gr-line{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 0 calc(var(--u)*1) var(--accent))}
-.gr-tag{position:absolute;right:0;top:-4%;font-weight:900;font-size:calc(var(--u)*9);line-height:1;color:var(--ink);background:var(--accent);padding:calc(var(--u)*.6) calc(var(--u)*1.6);border-radius:calc(var(--u)*1);transform-origin:100% 0}
-.gr-labels{position:absolute;left:0;right:0;bottom:calc(var(--u)*-5);display:flex;justify-content:space-between;font-weight:700;font-size:calc(var(--u)*2.6);text-transform:uppercase;letter-spacing:.06em}
+.gr{position:absolute;left:var(--side);right:var(--side);top:4%;height:34%}
+.gr-labels{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;font-weight:600;font-size:calc(var(--u)*2.3);letter-spacing:.12em;color:rgba(255,255,255,.88);text-shadow:0 0 calc(var(--u)*1.2) rgba(0,0,0,.4)}
+.gr-plot{position:absolute;left:0;right:0;top:12%;bottom:0}
+.gr-line{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 0 calc(var(--u)*.8) var(--accent))}
+.gr-tag{position:absolute;right:-1%;top:-6%;font-weight:900;font-size:calc(var(--u)*3.4);line-height:1;color:var(--ink);background:var(--accent);padding:calc(var(--u)*.7) calc(var(--u)*1.5);border-radius:calc(var(--u)*5);transform-origin:100% 50%;box-shadow:0 0 calc(var(--u)*2) var(--accent)}
+.a-wipe2{animation:reveal 1.1s cubic-bezier(.55,0,.25,1) calc(var(--t0) + .1s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
+.a-pop2{animation:pop .4s cubic-bezier(.2,1.6,.4,1) calc(var(--t0) + 1.1s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
 
 /* hand-drawn doodle */
 .dd{position:absolute;width:calc(var(--u)*22);height:calc(var(--u)*22);margin:calc(var(--u)*-11) 0 0 calc(var(--u)*-11)}
 .dd-boil{width:100%;height:100%;animation:boil .36s steps(1) calc(var(--t0)) infinite}
 .dd img{width:100%;height:100%;filter:drop-shadow(0 0 calc(var(--u)*.4) rgba(0,0,0,.35))}
 
-/* tick list */
-.ck{position:absolute;left:var(--side);right:var(--side);bottom:var(--lt-bottom);background:rgba(18,19,22,.9);border-radius:calc(var(--u)*2);padding:calc(var(--u)*2.4) calc(var(--u)*2.8);display:flex;flex-direction:column;gap:calc(var(--u)*1.6)}
-.ck-title{font-weight:800;font-size:calc(var(--u)*3);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
-.ck-row{display:flex;align-items:center;gap:calc(var(--u)*1.8);animation:up .4s cubic-bezier(.2,.8,.2,1) calc(var(--t0) + var(--at) - .25s) both}
-.ck-box{flex:none;width:calc(var(--u)*4.6);height:calc(var(--u)*4.6);border-radius:calc(var(--u)*1);border:calc(var(--u)*.4) solid rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;animation:tick .2s ease-out calc(var(--t0) + var(--at)) both}
-.ck-mark{width:80%;height:80%;animation:scribble .25s ease-out calc(var(--t0) + var(--at)) both}
-.ck-text{font-weight:700;font-size:calc(var(--u)*4);line-height:1.1}
+/* tick list: a dark glass card */
+.ck{position:absolute;left:8%;right:8%;top:46%;background:rgba(24,25,28,.86);border:1px solid rgba(255,255,255,.08);border-radius:calc(var(--u)*2.4);padding:calc(var(--u)*2.2) calc(var(--u)*2.6) calc(var(--u)*2.6);display:flex;flex-direction:column;gap:calc(var(--u)*2.1);box-shadow:0 calc(var(--u)*1.5) calc(var(--u)*5) rgba(0,0,0,.35)}
+.ck-head{display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:calc(var(--u)*2);letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.55)}
+.ck-count{position:relative;display:grid;letter-spacing:.04em;text-transform:none}
+.ck-n{grid-area:1/1;justify-self:end;opacity:0;animation:win var(--len) step-end calc(var(--t0) + var(--on)) forwards}
+@keyframes win{0%{opacity:1}100%{opacity:0}}
+@keyframes show{from{opacity:0}to{opacity:1}}
+.ck-bar{display:flex;height:calc(var(--u)*.45);margin-top:calc(var(--u)*-1);background:rgba(255,255,255,.1);border-radius:9px;overflow:hidden}
+.ck-seg{flex:1;background:var(--accent);transform-origin:0 50%;animation:grow .25s ease-out calc(var(--t0) + var(--on)) both}
+.ck-row{display:flex;align-items:center;gap:calc(var(--u)*2)}
+.ck-box{flex:none;width:calc(var(--u)*4.2);height:calc(var(--u)*4.2);border-radius:50%;border:calc(var(--u)*.35) solid rgba(255,255,255,.35);display:flex;align-items:center;justify-content:center;animation:tick .18s ease-out calc(var(--t0) + var(--at) + var(--type)) both}
+.ck-mark{width:72%;height:72%;animation:scribble .22s ease-out calc(var(--t0) + var(--at) + var(--type)) both}
+.ck-slot{position:relative;flex:1;min-width:0;height:calc(var(--u)*4.4);display:flex;align-items:center}
+.ck-skel{position:absolute;left:0;width:62%;height:calc(var(--u)*1.4);border-radius:9px;background:rgba(255,255,255,.12);animation:show .12s linear calc(var(--t0) + var(--at)) reverse both}
+.ck-text{font-weight:600;font-size:calc(var(--u)*3.6);line-height:1.1;white-space:nowrap;overflow:hidden;clip-path:inset(0 100% 0 0);animation:type var(--type) steps(var(--chars)) calc(var(--t0) + var(--at)) both}
+@keyframes type{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+
+/* magazine cover lines */
+.bt-lines{position:absolute;inset:0}
+.bt-line{position:absolute;max-width:30%;font-family:"Playfair Display",serif;font-size:calc(var(--u)*3.4);line-height:1.05;color:var(--text);text-shadow:0 0 calc(var(--u)*1.2) rgba(0,0,0,.4)}
+.bt-line-l{left:var(--side)}
+.bt-line-r{right:var(--side);text-align:right}
+
+/* comment cards */
+.cw{position:absolute;inset:0}
+.cw-card{position:absolute;max-width:38%;background:#fff;color:#111;border-radius:calc(var(--u)*1.4);padding:calc(var(--u)*1.4) calc(var(--u)*1.8);font-family:"Roboto",sans-serif;font-weight:700;font-size:calc(var(--u)*2.7);line-height:1.15;box-shadow:0 calc(var(--u)*.6) calc(var(--u)*2.4) rgba(0,0,0,.3);transform:rotate(var(--tilt));animation:cardpop .38s cubic-bezier(.2,1.5,.4,1) both,fade .3s ease-in forwards}
+.cw-dark{background:#111;color:#fff}
+.cw-who{width:calc(var(--u)*9);height:calc(var(--u)*1);border-radius:9px;background:currentColor;opacity:.18;margin-bottom:calc(var(--u)*.9)}
+@keyframes cardpop{from{transform:rotate(var(--tilt)) scale(.3);opacity:0}to{transform:rotate(var(--tilt)) scale(1);opacity:1}}
+
+/* wall of pictures */
+.pw{position:absolute;left:3%;right:3%;top:3%;height:56%;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:calc(var(--u)*2)}
+.pw-tile{background:#fff;padding:calc(var(--u)*.6);box-shadow:0 calc(var(--u)*.6) calc(var(--u)*2) rgba(0,0,0,.35);transform:rotate(var(--tilt));animation:cardpop .35s cubic-bezier(.2,1.5,.4,1) both,fade .3s ease-in forwards}
+.pw-tile img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* phone */
+.ph{position:absolute;width:30%;aspect-ratio:9/19.5;background:#0d0e10;border-radius:calc(var(--u)*5);padding:calc(var(--u)*1);box-shadow:0 calc(var(--u)*1.5) calc(var(--u)*5) rgba(0,0,0,.45),inset 0 0 0 calc(var(--u)*.35) #3a3d44;animation:phin .55s cubic-bezier(.2,1.1,.3,1) both,fade .3s ease-in calc(var(--d) - .3s) forwards}
+.ph-screen{width:100%;height:100%;border-radius:calc(var(--u)*4);overflow:hidden;background:#000}
+.ph-screen img{width:100%;height:100%;object-fit:cover;display:block}
+.ph-notch{position:absolute;left:38%;right:38%;top:calc(var(--u)*2);height:calc(var(--u)*2.2);border-radius:9px;background:#0d0e10}
+@keyframes phin{from{transform:translateX(-60%) rotate(-12deg);opacity:0}to{transform:none;opacity:1}}
+
+/* orbiting pictures */
+@property --a{syntax:'<angle>';inherits:true;initial-value:0deg}
+.ob{position:absolute;left:50%;top:44%;width:0;height:0;animation:spin var(--d) linear both}
+@keyframes spin{from{--a:0deg}to{--a:300deg}}
+.ob-card{position:absolute;width:calc(var(--u)*24);aspect-ratio:9/16;margin:calc(var(--u)*-21) 0 0 calc(var(--u)*-12);background:#fff;padding:calc(var(--u)*.6);border-radius:calc(var(--u)*1.4);box-shadow:0 calc(var(--u)*.8) calc(var(--u)*3) rgba(0,0,0,.4);
+  --t:calc(var(--a) + var(--a0));
+  transform:translateX(calc(sin(var(--t)) * var(--u) * 36)) translateY(calc(cos(var(--t)) * var(--u) * 6)) scale(calc(.78 + cos(var(--t)) * .22))}
+.ob-card img{width:100%;height:100%;object-fit:cover;border-radius:calc(var(--u)*1);display:block}
+.ob-front .ob-card{opacity:clamp(0,calc(cos(var(--t)) * 40 + .5),1)}
+.ob-back .ob-card{opacity:clamp(0,calc(cos(var(--t)) * -40 + .5),1);filter:brightness(.8)}
+
+/* ransom letters */
+.rn{position:absolute;left:var(--side);right:var(--side);top:7%;display:flex;flex-wrap:wrap;gap:calc(var(--u)*.8);align-items:center}
+.rn-l{display:inline-block;padding:calc(var(--u)*.6) calc(var(--u)*1.2);font-size:calc(var(--u)*9);line-height:1;font-weight:900;box-shadow:0 calc(var(--u)*.4) calc(var(--u)*1) rgba(0,0,0,.3);transform:rotate(var(--tilt));animation:cardpop .25s cubic-bezier(.2,1.6,.4,1) both,fade .3s ease-in forwards}
+.rn-gap{width:calc(var(--u)*3)}
+
+/* scribbled sound wave */
+.wf{position:absolute;left:4%;right:4%;height:22%}
+.wf-line{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
 
 /* logo */
 .lg{position:absolute;right:var(--side);top:5%;width:calc(var(--u)*14);height:calc(var(--u)*14);display:flex;align-items:center;justify-content:center;transform-origin:100% 0}
