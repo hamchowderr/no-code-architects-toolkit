@@ -253,7 +253,7 @@ Each endpoint is supported by robust payload validation and detailed API documen
 ### Security
 
 #### `BLOCK_PRIVATE_URLS`
-- **Purpose**: Refuse to download files from private or internal addresses (localhost, 10.x, 192.168.x, cloud metadata, other containers on the same server), including after a redirect.
+- **Purpose**: Refuse links to private or internal addresses (localhost, 10.x, 192.168.x, cloud metadata, other containers on the same server), including after a redirect. Every link in a request is checked before the job starts (fields named `*_url`, and links written into FFmpeg filters), because most endpoints hand links straight to FFmpeg. Webhooks to such addresses are not sent.
 - **Default**: false, so a local setup can still read from MinIO or another container.
 - **Recommendation**: Set to `true` on any toolkit that other people send links to, such as one shared by several teams.
 
