@@ -18,8 +18,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 import pytest
 
+from services.v1.video import cutout
 from services.v1.video import motion as mo
-from services.v1.video.motion.pieces import PIECES, sheet_html
+from services.v1.video.motion.pieces import DOODLES, PIECES, sheet_html
 
 from conftest import API_KEY, ROOT
 
@@ -149,6 +150,57 @@ def test_a_plain_number_counts_up_and_other_stats_just_appear():
     assert "st-n" not in plain.split("</style>")[1] and "1,200 people" in plain
 
 
+def test_pieces_sit_in_front_unless_they_say_behind_and_new_pieces_need_their_words():
+    pieces, _ = mo.plan([
+        {"type": "big_text", "start": 1, "title": "Takewon", "layer": "behind"},
+        {"type": "keyword", "start": 2, "title": "Wow"},
+    ], [], 30)
+    assert [p["layer"] for p in pieces] == ["behind", "front"]
+    with pytest.raises(mo.MotionError, match="big text piece needs its words"):
+        mo.plan([{"type": "big_text", "start": 1}], [], 30)
+    with pytest.raises(mo.MotionError, match="checklist piece needs its items"):
+        mo.plan([{"type": "checklist", "start": 1}], [], 30)
+    pieces, _ = mo.plan([{"type": "doodle", "start": 1, "shape": "crown"}, {"type": "graph", "start": 3}], [], 30)
+    assert len(pieces) == 2
+
+
+def test_outlines_and_punch_ins_stay_inside_the_video_and_punch_ins_cannot_overlap():
+    outlines, zooms = mo.plan_effects(
+        [{"start": 2, "duration": 50, "color": "#ff0000", "width": 9}, {"start": 40}],
+        [{"start": 5, "duration": 1, "scale": 4}, {"start": 1, "duration": 1}],
+        30,
+    )
+    assert outlines == [{"start": 2.0, "end": 30.0, "color": "#ff0000", "width": 4.0}]
+    assert [(z["start"], z["end"], z["scale"]) for z in zooms] == [(1.0, 2.0, 1.3), (5.0, 6.0, 2.5)]
+    with pytest.raises(mo.MotionError, match="overlap"):
+        mo.plan_effects([], [{"start": 1, "duration": 2}, {"start": 2, "duration": 2}], 30)
+
+
+def test_behind_pieces_and_outlines_need_the_mask(tmp_path):
+    request = {"pieces": [{"type": "big_text", "start": 1, "title": "Hi", "layer": "behind"}]}
+    assert mo.needs_mask(request) and mo.needs_mask({"outlines": [{"start": 1}]})
+    assert not mo.needs_mask({"pieces": [{"type": "title", "start": 1, "title": "x"}], "zooms": [{"start": 1, "duration": 1}]})
+    with pytest.raises(mo.MotionError, match="cut out first"):
+        mo.render_motion(CLIP, str(tmp_path / "o.mp4"), str(tmp_path), request)
+
+
+def test_new_pieces_draw_their_items_and_drawings():
+    pieces = [
+        {"type": "checklist", "duration": 4, "title": "Ready", "items": ["Cut <the> pauses", "Add captions"]},
+        {"type": "graph", "duration": 3, "title": "10X", "items": ["Jan", "Apr"]},
+        {"type": "doodle", "duration": 2, "shape": "crown", "x": 40, "y": 10},
+        {"type": "big_text", "duration": 2, "title": "Takewon", "y": 22},
+    ]
+    html = sheet_html(pieces, 1080, 1920, {"accent": "#ffcf3f"}, 11)
+    assert "Cut &lt;the&gt; pauses" in html and html.count('class="ck-row"') == 2
+    assert html.count("data:image/svg+xml") == 2 + 1 + 1  # two ticks, the graph line, the doodle
+    assert "%23ffcf3f" in html  # the accent colour reaches the drawings
+    assert "left:40.0%;top:10.0%" in html and "top:22.0%" in html
+    # HyperFrames draws inline <svg> only in a sheet's first piece, so drawings are pictures.
+    assert "<svg" not in html
+    assert set(DOODLES) >= {"crown", "star", "heart", "arrow"}
+
+
 # --- The FFmpeg graph ----------------------------------------------------------------------------
 
 def test_graph_cuts_each_piece_from_the_sheet_and_places_it_at_its_time():
@@ -170,6 +222,31 @@ def test_graph_mixes_sounds_over_the_video_sound_or_over_silence():
     assert "anullsrc" in silent and "[base][a0]amix=inputs=2" in silent
 
 
+def test_graph_lays_behind_pieces_then_outlines_then_the_person_then_front_pieces():
+    pieces = [
+        {"type": "big_text", "start": 1.0, "duration": 2.0, "layer": "behind"},
+        {"type": "keyword", "start": 1.5, "duration": 1.0, "layer": "front"},
+    ]
+    outlines = [{"start": 0.0, "end": 4.0, "color": "#ffffff", "width": 1.5}]
+    zooms = [{"start": 5.0, "end": 6.0, "scale": 1.3, "focus_y": 0.35}]
+    graph, video, _ = mo.filter_graph(pieces, [], True, 8, mask_input=2, outlines=outlines, zooms=zooms, size=(640, 360), fps=25)
+    assert "split=2[base][keep]" in graph and "[2:v]format=gray,scale=640:360" in graph and "split=2[m0][m1]" in graph
+    assert "[keep][m0]alphamerge[person]" in graph
+    behind = graph.index("[p0]overlay")
+    ring = graph.index("[ring0]overlay")
+    person = graph.index("[person]overlay")
+    front = graph.index("[p1]overlay")
+    assert behind < ring < person < front
+    assert "lutrgb=r=255:g=255:b=255" in graph and "gblur=sigma=2.70" in graph  # 1.5% of 360 px, halved
+    assert "zoompan=z='1+0.3000*between(it,5.000,6.000)" in graph and "s=640x360:fps=25.000000" in graph
+    assert video == "[vout]"
+
+
+def test_graph_without_a_mask_lays_every_piece_in_front():
+    graph, _, _ = mo.filter_graph([{"type": "title", "start": 1.0, "duration": 2.0}], [], True, 8)
+    assert "alphamerge" not in graph and "[keep]" not in graph
+
+
 # --- For real ------------------------------------------------------------------------------------
 
 def test_sounds_alone_are_mixed_in_and_the_picture_is_untouched(tmp_path):
@@ -189,6 +266,38 @@ def test_nothing_to_add_is_refused(tmp_path):
 def test_a_file_with_no_picture_is_refused(tmp_path):
     with pytest.raises(mo.MotionError, match="no picture"):
         mo.render_motion(os.path.join(DATA, "jfk.ogg"), str(tmp_path / "o.mp4"), str(tmp_path), {"sounds": [{"sound": "pop", "at": 1}]})
+
+
+@pytest.fixture(scope="module")
+def mask(tmp_path_factory):
+    out = str(tmp_path_factory.mktemp("mask") / "mask.mp4")
+    cutout.make_mask(CLIP, out)
+    return out
+
+
+def red(img):
+    return (img[..., 0] > 170) & (img[..., 1] < 90) & (img[..., 2] < 90)
+
+
+def test_an_outline_rings_the_people_and_a_punch_in_fills_the_frame(tmp_path, mask):
+    out = str(tmp_path / "out.mp4")
+    request = {
+        "outlines": [{"start": 1.0, "duration": 2.0, "color": "#ff0000", "width": 2}],
+        "zooms": [{"start": 5.0, "duration": 1.5, "scale": 1.5}],
+    }
+    result = mo.render_motion(CLIP, out, str(tmp_path), request, mask=mask)
+    assert result["outlines"] == 1 and result["zooms"] == 1 and result["pieces"] == 0
+    assert result["width"] == 640 and result["height"] == 360
+    assert abs(length_of(out) - length_of(CLIP)) < 0.15
+    size = (320, 180)
+    m = frame(mask, 2.0, size).mean(axis=2)
+    ring = red(frame(out, 2.0, size)) & ~red(frame(CLIP, 2.0, size))
+    assert ring.sum() > 100
+    assert m[ring].mean() < 128  # the ring sits outside the person, not on them
+    assert red(frame(out, 4.0, size)).sum() <= red(frame(CLIP, 4.0, size)).sum() + 5  # gone once it ends
+    # The punch-in changes the picture while it lasts and not after.
+    assert np.abs(frame(out, 6.0) - frame(CLIP, 6.0)).mean() > 15
+    assert np.abs(frame(out, 7.5) - frame(CLIP, 7.5)).mean() < 4
 
 
 # CI sets REQUIRE_HYPERFRAMES so this can never be skipped there by mistake.
@@ -218,6 +327,25 @@ def test_pieces_are_drawn_over_the_video_only_while_they_show(tmp_path):
     assert band[0] > 180 and band[1] < 120  # #ff2a6d
     # Each piece brought its sound.
     assert loudness(out, 1.0, 0.3) > loudness(CLIP, 1.0, 0.3)
+
+
+@pytest.mark.skipif(not HAS_HYPERFRAMES and not os.environ.get("REQUIRE_HYPERFRAMES"), reason="HyperFrames is not installed")
+def test_big_words_behind_the_speaker_are_hidden_where_the_person_is(tmp_path, mask):
+    out = str(tmp_path / "out.mp4")
+    request = {
+        "style": {"text": "#ff0000"},
+        "pieces": [{"type": "big_text", "start": 1.0, "duration": 3.0, "title": "WOW", "layer": "behind", "y": 25, "sound": None}],
+    }
+    result = mo.render_motion(CLIP, out, str(tmp_path), request, mask=mask)
+    assert result["behind"] == 1
+    size = (320, 180)
+    m = frame(mask, 2.5, size).mean(axis=2)
+    after, before = frame(out, 2.5, size), frame(CLIP, 2.5, size)
+    words = red(after) & ~red(before)
+    assert words.sum() > 200  # the words show around the people
+    person = m > 245
+    assert np.abs(after[person] - before[person]).mean() < 8  # and not over them
+    assert (words & person).sum() < words.sum() * 0.02
 
 
 # --- The request -----------------------------------------------------------------------------
@@ -291,6 +419,34 @@ def test_request_with_nothing_inside_the_video_says_so(client, file_server):
     assert res.status_code == 400 and "Nothing to add" in res.get_json()["message"]
 
 
+def test_request_with_an_outline_cuts_the_speaker_out_and_hands_back_the_mask(client, file_server):
+    res = client.post(
+        "/v1/video/motion",
+        json={"video_url": f"{file_server}/reframe_cut.mp4", "outlines": [{"start": 1, "duration": 2}]},
+        headers={"X-API-Key": API_KEY},
+    )
+    assert res.status_code == 200, res.get_json()
+    body = res.get_json()["response"]
+    assert body["mask_url"].endswith("_mask.mp4") and body["outlines"] == 1
+    assert len(client.uploads) == 2
+
+
+def test_request_checks_the_new_fields(client):
+    headers = {"X-API-Key": API_KEY}
+    url = "https://x.example/a.mp4"
+    bad = [
+        {"video_url": url, "pieces": [{"type": "big_text", "start": 1, "title": "x", "layer": "middle"}]},
+        {"video_url": url, "pieces": [{"type": "doodle", "start": 1, "shape": "dragon"}]},
+        {"video_url": url, "pieces": [{"type": "checklist", "start": 1, "items": ["a"] * 7}]},
+        {"video_url": url, "pieces": [{"type": "doodle", "start": 1, "x": 120}]},
+        {"video_url": url, "zooms": [{"start": 1, "duration": 1, "scale": 3}]},
+        {"video_url": url, "zooms": [{"start": 1}]},
+        {"video_url": url, "outlines": [{"start": 1, "color": "white"}]},
+    ]
+    for payload in bad:
+        assert client.post("/v1/video/motion", json=payload, headers=headers).status_code == 400, payload
+
+
 def test_catalog_lists_pieces_looks_and_sounds(client):
     assert client.get("/v1/video/motion/catalog").status_code == 401
     res = client.get("/v1/video/motion/catalog", headers={"X-API-Key": API_KEY})
@@ -298,3 +454,4 @@ def test_catalog_lists_pieces_looks_and_sounds(client):
     body = res.get_json()
     assert set(body["pieces"]) == set(PIECES) and "bold" in body["looks"] and "whoosh" in body["sounds"]
     assert body["pieces"]["lower_third"]["sound"] == "slide"
+    assert body["layers"] == ["front", "behind"] and "crown" in body["doodles"]

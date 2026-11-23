@@ -25,6 +25,11 @@
 
 A request with no pieces only mixes in sounds, and a request with no sounds keeps the
 video's sound untouched.
+
+Behind the speaker: a piece with "layer": "behind" is drawn between the background and
+the person. The person is cut back out with their mask (services/v1/video/cutout.py) and
+laid over it, so words, graphs and doodles sit behind their head. The same mask draws
+sticker outlines ("outlines") around the person. "zooms" punch in on the picture last.
 """
 
 import glob
@@ -35,7 +40,9 @@ import shutil
 import subprocess
 import time
 
-from .pieces import PIECES, sheet_html
+from ..cutout import CutoutError, head_top
+from ..cutout import probe as probe_video
+from .pieces import NEEDS_TITLE, PIECES, big_text_size, sheet_html
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +57,10 @@ HYPERFRAMES = os.environ.get("HYPERFRAMES_BIN", "hyperframes")
 RENDER_TIMEOUT = int(os.environ.get("MOTION_RENDER_TIMEOUT", "1800"))
 MAX_PIECES = 120
 MAX_SOUNDS = 400
+MAX_ZOOMS = 200
+MAX_OUTLINES = 50
 FPS = 30
+ZOOM_RAMP = 0.12  # seconds a punch-in takes to reach its size
 
 
 class MotionError(Exception):
@@ -58,19 +68,12 @@ class MotionError(Exception):
 
 
 def probe(path):
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height,r_frame_rate:format=duration", "-of", "json", path],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    info = json.loads(out)
-    video = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
-    if not video:
-        raise MotionError("This file has no picture to put motion graphics on.")
-    has_audio = any(s.get("codec_type") == "audio" for s in info.get("streams", []))
-    duration = float(info.get("format", {}).get("duration") or 0)
-    if duration <= 0:
-        raise MotionError("Could not read how long this video is.")
-    return {"width": int(video["width"]), "height": int(video["height"]), "duration": duration, "has_audio": has_audio}
+    """Upright size (phone videos are turned the right way up), length, frame rate and sound."""
+    try:
+        info = probe_video(path)
+    except CutoutError as e:
+        raise MotionError(str(e).replace("cut the speaker out of", "put motion graphics on"))
+    return info
 
 
 def plan(pieces, sounds, duration, sound_volume=1.0, piece_sounds=True):
@@ -99,9 +102,11 @@ def plan(pieces, sounds, duration, sound_volume=1.0, piece_sounds=True):
             continue
         if kind == "logo" and not raw.get("image"):
             raise MotionError("A logo piece needs the logo's link.")
-        if kind in ("lower_third", "title", "keyword", "stat", "chapter", "follow", "quote") and not str(raw.get("title") or "").strip():
+        if kind in NEEDS_TITLE and not str(raw.get("title") or "").strip():
             raise MotionError(f"A {kind.replace('_', ' ')} piece needs its words.")
-        piece = dict(raw, start=round(start, 3), duration=round(length, 3))
+        if kind == "checklist" and not (raw.get("items") or str(raw.get("title") or "").strip()):
+            raise MotionError("A checklist piece needs its items.")
+        piece = dict(raw, start=round(start, 3), duration=round(length, 3), layer=raw.get("layer") or "front")
         placed.append(piece)
         sound = raw.get("sound", default_sound) if piece_sounds else raw.get("sound")
         if sound:
@@ -123,29 +128,139 @@ def plan(pieces, sounds, duration, sound_volume=1.0, piece_sounds=True):
     return placed, cues
 
 
-def filter_graph(pieces, cues, has_audio, video_duration):
+def plan_effects(outlines, zooms, duration):
+    """Checks the sticker outlines and punch-ins. Returns both, sorted and kept inside the video."""
+    if len(outlines) > MAX_OUTLINES:
+        raise MotionError(f"At most {MAX_OUTLINES} sticker outlines can go on one video.")
+    if len(zooms) > MAX_ZOOMS:
+        raise MotionError(f"At most {MAX_ZOOMS} punch-ins can go on one video.")
+
+    def window(raw):
+        start = max(0.0, float(raw.get("start", 0)))
+        length = raw.get("duration")
+        end = duration if length is None else min(duration, start + float(length))
+        return round(start, 3), round(end, 3)
+
+    kept_outlines = []
+    for raw in outlines:
+        start, end = window(raw)
+        if end - start >= 0.1:
+            kept_outlines.append({
+                "start": start, "end": end,
+                "color": raw.get("color") or "#ffffff",
+                "width": max(0.3, min(4.0, float(raw.get("width", 1.4)))),
+            })
+    kept_zooms = []
+    for raw in zooms:
+        start, end = window(raw)
+        if end - start >= 0.1:
+            kept_zooms.append({
+                "start": start, "end": end,
+                "scale": max(1.02, min(2.5, float(raw.get("scale", 1.3)))),
+                "focus_y": max(0.0, min(1.0, float(raw.get("focus_y", 0.35)))),
+            })
+    for earlier, later in zip(sorted(kept_zooms, key=lambda z: z["start"]), sorted(kept_zooms, key=lambda z: z["start"])[1:]):
+        if later["start"] < earlier["end"]:
+            raise MotionError("Two punch-ins overlap. Give each its own time.")
+    kept_outlines.sort(key=lambda o: o["start"])
+    kept_zooms.sort(key=lambda z: z["start"])
+    return kept_outlines, kept_zooms
+
+
+def zoom_filter(zooms, width, height, fps):
+    """A zoompan filter that punches in for each zoom (eased over ZOOM_RAMP) and back out."""
+    z = "1"
+    y = "ih/2-(ih/zoom/2)"
+    for zm in zooms:
+        a, b, gain = zm["start"], zm["end"], zm["scale"] - 1
+        z += f"+{gain:.4f}*between(it,{a:.3f},{b:.3f})*min(1,(it-{a:.3f})/{ZOOM_RAMP})"
+    if zooms:
+        # One focus height for the whole video keeps the expression short; the first zoom's wins.
+        fy = zooms[0]["focus_y"]
+        y = f"(ih-ih/zoom)*{fy:.3f}"
+    return f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='{y}':d=1:s={width}x{height}:fps={fps:.6f}"
+
+
+def outline_px(width_percent, width, height):
+    return max(1.0, width_percent / 100.0 * min(width, height))
+
+
+def _hex_rgb(color):
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def filter_graph(pieces, cues, has_audio, video_duration, mask_input=None, outlines=(), zooms=(), size=None, fps=FPS):
     """The FFmpeg filter that lays the pieces from the sheet (input 1) over the video (input 0)
-    and mixes the sound cues (inputs 2...). Returns (graph, video label, audio label or None)."""
+    and mixes the sound cues (inputs 2...). With behind pieces or outlines, the speaker's mask
+    is input `mask_input`. Returns (graph, video label, audio label or None)."""
     parts = []
     video = "[0:v]"
-    if pieces:
+    width, height = size or (0, 0)
+    behind = [i for i, p in enumerate(pieces) if p.get("layer") == "behind"]
+    layered = mask_input is not None and (behind or outlines)
+    if pieces or outlines or zooms:
         # Even sides, so the result can be H.264.
-        parts.append("[0:v]crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0[base]")
+        crop = "[0:v]crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0,setsar=1"
+        parts.append(crop + (",split=2[base][keep]" if layered else "[base]"))
         video = "[base]"
-        parts.append(f"[1:v]split={len(pieces)}" + "".join(f"[s{i}]" for i in range(len(pieces))) if len(pieces) > 1 else "[1:v]null[s0]")
-        offset = 0.0
-        for i, piece in enumerate(pieces):
-            end = offset + piece["duration"]
-            start = piece["start"]
+        if layered:
+            masks = 1 + len(outlines)
+            labels = "".join(f"[m{i}]" for i in range(masks))
             parts.append(
-                f"[s{i}]trim=start={offset:.3f}:end={end:.3f},setpts=PTS-STARTPTS+{start:.3f}/TB[p{i}]"
+                f"[{mask_input}:v]format=gray,scale={width}:{height}:flags=bicubic,setsar=1"
+                + (f",split={masks}{labels}" if masks > 1 else "[m0]")
             )
-            out = f"[v{i}]"
+            parts.append("[keep][m0]alphamerge[person]")
+
+        if pieces:
+            parts.append(f"[1:v]split={len(pieces)}" + "".join(f"[s{i}]" for i in range(len(pieces))) if len(pieces) > 1 else "[1:v]null[s0]")
+        offsets = []
+        offset = 0.0
+        for piece in pieces:
+            offsets.append(offset)
+            offset += piece["duration"]
+
+        step = [0]
+
+        def lay(i):
+            nonlocal video
+            piece, start, off = pieces[i], pieces[i]["start"], offsets[i]
+            parts.append(f"[s{i}]trim=start={off:.3f}:end={off + piece['duration']:.3f},setpts=PTS-STARTPTS+{start:.3f}/TB[p{i}]")
+            out = f"[v{step[0]}]"
+            step[0] += 1
             parts.append(
                 f"{video}[p{i}]overlay=eof_action=pass:format=auto:enable='between(t,{start:.3f},{start + piece['duration']:.3f})'{out}"
             )
             video = out
-            offset = end
+
+        front = [i for i in range(len(pieces)) if i not in behind] if layered else list(range(len(pieces)))
+        if layered:
+            for i in behind:
+                lay(i)
+            for j, ol in enumerate(outlines):
+                # The mask, spread out by the outline's width, filled with its colour.
+                px = outline_px(ol["width"], width, height)
+                r, g, b = _hex_rgb(ol["color"])
+                parts.append(
+                    f"[m{j + 1}]gblur=sigma={px / 2:.2f},lut=c0='if(gt(val,6),255,0)',gblur=sigma=1,split=2[oa{j}][ob{j}]"
+                )
+                parts.append(f"[oa{j}]format=rgb24,lutrgb=r={r}:g={g}:b={b}[oc{j}]")
+                parts.append(f"[oc{j}][ob{j}]alphamerge[ring{j}]")
+                out = f"[v{step[0]}]"
+                step[0] += 1
+                parts.append(f"{video}[ring{j}]overlay=format=auto:enable='between(t,{ol['start']:.3f},{ol['end']:.3f})'{out}")
+                video = out
+            out = f"[v{step[0]}]"
+            step[0] += 1
+            parts.append(f"{video}[person]overlay=format=auto{out}")
+            video = out
+        for i in front:
+            lay(i)
+        if zooms:
+            out = f"[v{step[0]}]"
+            step[0] += 1
+            parts.append(f"{video}{zoom_filter(zooms, width, height, fps)}{out}")
+            video = out
         parts.append(f"{video}format=yuv420p[vout]")
         video = "[vout]"
 
@@ -167,6 +282,11 @@ def filter_graph(pieces, cues, has_audio, video_duration):
         parts.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:dropout_transition=0:normalize=0[aout]")
         audio = "[aout]"
     return ";".join(parts), video, audio
+
+
+def needs_mask(request):
+    """True when the request draws something that needs the speaker cut out."""
+    return bool(request.get("outlines")) or any((p.get("layer") == "behind") for p in request.get("pieces") or [])
 
 
 def find_browser():
@@ -215,8 +335,10 @@ def render_sheet(pieces, width, height, style, work_dir, image_files):
     return out
 
 
-def render_motion(src, out, work_dir, request, fetch_image=None):
-    """Lays the request's pieces and sounds over `src` and writes `out`. Returns a summary."""
+def render_motion(src, out, work_dir, request, fetch_image=None, mask=None):
+    """Lays the request's pieces and sounds over `src` and writes `out`. Returns a summary.
+
+    `mask` is the speaker's mask video (cutout.make_mask), needed for behind pieces and outlines."""
     started = time.time()
     info = probe(src)
     width, height = info["width"] - info["width"] % 2, info["height"] - info["height"] % 2
@@ -227,8 +349,28 @@ def render_motion(src, out, work_dir, request, fetch_image=None):
         sound_volume=float(request.get("sound_volume", 1.0)),
         piece_sounds=request.get("piece_sounds", True),
     )
-    if not pieces and not cues:
-        raise MotionError("Nothing to add: no motion pieces or sound effects fall inside the video.")
+    outlines, zooms = plan_effects(request.get("outlines") or [], request.get("zooms") or [], info["duration"])
+    if not pieces and not cues and not outlines and not zooms:
+        raise MotionError("Nothing to add: no motion pieces, sound effects, outlines or punch-ins fall inside the video.")
+    layered = any(p["layer"] == "behind" for p in pieces) or outlines
+    if layered and not mask:
+        raise MotionError("Pieces behind the speaker and sticker outlines need the speaker cut out first.")
+
+    # With the speaker's mask, a doodle with no place given goes just above their head, and
+    # big words behind them drop so the head covers the bottom of the letters.
+    short = min(width, height)
+    for piece in pieces:
+        if not mask or piece.get("x") is not None or piece.get("y") is not None:
+            continue
+        if piece["type"] == "doodle":
+            spot = head_top(mask, piece["start"] + 0.2, width, height)
+            if spot:
+                piece["x"], piece["y"] = spot[0], max(6.0, spot[1] - 9.0)
+        elif piece["type"] == "big_text" and piece["layer"] == "behind":
+            spot = head_top(mask, piece["start"] + 0.2, width, height)
+            if spot:
+                letters = big_text_size(piece.get("title") or "", width / short) * short / 100 * 0.9 / height * 100
+                piece["y"] = max(4.0, min(60.0, spot[1] - letters * 0.6))
 
     # Logos are fetched once and handed to the sheet as local files.
     image_files = {}
@@ -250,12 +392,19 @@ def render_motion(src, out, work_dir, request, fetch_image=None):
         inputs += ["-f", "lavfi", "-t", "0.1", "-i", "color=c=black@0:s=16x16"]
     for cue in cues:
         inputs += ["-i", SOUNDS[cue["sound"]]]
+    mask_input = None
+    if layered:
+        mask_input = 2 + len(cues)
+        inputs += ["-i", mask]
 
-    graph, video, audio = filter_graph(pieces, cues, info["has_audio"], info["duration"])
+    graph, video, audio = filter_graph(
+        pieces, cues, info["has_audio"], info["duration"],
+        mask_input=mask_input, outlines=outlines, zooms=zooms, size=(width, height), fps=info["fps"],
+    )
     cmd = ["ffmpeg", "-y", "-v", "error", *inputs]
     if graph:
         cmd += ["-filter_complex", graph]
-    if pieces:
+    if pieces or outlines or zooms:
         cmd += ["-map", video, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
     else:
         cmd += ["-map", "0:v", "-c:v", "copy"]
@@ -271,6 +420,9 @@ def render_motion(src, out, work_dir, request, fetch_image=None):
 
     return {
         "pieces": len(pieces),
+        "behind": sum(1 for p in pieces if p["layer"] == "behind"),
+        "outlines": len(outlines),
+        "zooms": len(zooms),
         "sounds": len(cues),
         "duration": round(info["duration"], 3),
         "width": width,

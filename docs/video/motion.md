@@ -12,6 +12,12 @@ Everything runs on the toolkit itself. The pieces are drawn by [HyperFrames](htt
 
 A request with only sounds keeps the picture as it is (no re-encode).
 
+### Behind the speaker
+
+A piece with `"layer": "behind"` is drawn between the background and the person, so big words, a rising graph or a doodle sit behind their head. This needs the speaker's mask from [`/v1/video/cutout`](cutout.md): pass it as `mask_url`. Without one, the toolkit cuts the speaker out first and sends the mask back as `mask_url`, so keep it with the video for the next request.
+
+The same mask draws sticker outlines around the person (`outlines`). Punch-ins (`zooms`) work on any video and need no mask.
+
 ## Request
 
 `POST /v1/video/motion` with the `X-API-Key` header.
@@ -25,6 +31,9 @@ A request with only sounds keeps the picture as it is (no re-encode).
 | `style.accent` | `#rrggbb` | `#46e5b7` | Accent colour (use the brand colour) |
 | `style.text` | `#rrggbb` | `#ffffff` | Text colour |
 | `style.font` | font name | look's font | Any font installed on the toolkit or on Google Fonts |
+| `mask_url` | string | | The speaker's mask from `/v1/video/cutout`. Only used by behind pieces and outlines |
+| `outlines` | array, up to 50 | `[]` | Sticker outlines around the person: `{start?, duration?, color?, width?}`. No `duration` runs to the end. `width` is a percent of the frame's short side (0.3 to 4, default 1.4), `color` defaults to white |
+| `zooms` | array, up to 200 | `[]` | Punch-ins: `{start, duration, scale?, focus_y?}`. `scale` 1.02 to 2.5 (default 1.3). `focus_y` is how far down the frame to zoom into, 0 (top) to 1 (bottom), default 0.35 (where a face usually is). Punch-ins cannot overlap |
 | `sound_volume` | number, 0 to 2 | `1` | Scales every sound; `0` mutes them all |
 | `piece_sounds` | boolean | `true` | Whether pieces play their own sound |
 | `webhook_url` | string | | Send the answer here when done (recommended) |
@@ -32,7 +41,7 @@ A request with only sounds keeps the picture as it is (no re-encode).
 
 ### Pieces
 
-Each piece is `{type, start, duration?, title?, subtitle?, image?, sound?}`. `start` is seconds into the video. `duration` is kept between the type's shortest and longest and inside the video. `sound` picks another sound, or `null` for none.
+Each piece is `{type, start, duration?, title?, subtitle?, image?, items?, shape?, x?, y?, layer?, sound?}`. `start` is seconds into the video. `layer` is `"front"` (default) or `"behind"`. `duration` is kept between the type's shortest and longest and inside the video. `sound` picks another sound, or `null` for none.
 
 | `type` | `title` | `subtitle` | Length (default, shortest to longest) | Sound |
 |---|---|---|---|---|
@@ -45,6 +54,10 @@ Each piece is `{type, start, duration?, title?, subtitle?, image?, sound?}`. `st
 | `quote` | The quote | Who said it | 4.5 s (2 to 12) | thud |
 | `transition` | | | 0.7 s (0.4 to 1.5) | whoosh |
 | `logo` | | | 3 s (1 s to the whole video). Needs `image` (a link to the logo) | ding |
+| `big_text` | Big words across the top, sized to fill the width (the `editorial` look gives a magazine masthead, `clean` see-through glass letters) | Small line above it | 3 s (1 s to the whole video). `y` sets the top in percent; behind the speaker with a mask, it drops so the head covers the bottom of the letters | impact |
+| `graph` | Tag at the end of the line, such as `10X` | | 3.5 s (2 to 10). `items`: up to 6 labels along the bottom, such as months | riser |
+| `doodle` | | | 2.5 s (1 s to the whole video). `shape`: `crown`, `star`, `heart`, `arrow`, `burst` or `circle`. `x`, `y` place its centre in percent; behind the speaker with a mask and no place given, it goes just above their head | pop |
+| `checklist` | Small heading | | 4 s (2 to 12). `items`: up to 6 lines, ticked one after another | tick |
 
 Sounds: `click`, `ding`, `impact`, `pop`, `riser`, `slide`, `thud`, `tick`, `whoosh`.
 
@@ -67,13 +80,35 @@ Sounds: `click`, `ding`, `impact`, `pop`, `riser`, `slide`, `thud`, `tick`, `who
 }
 ```
 
+Behind the speaker, with a sticker outline and a punch-in:
+
+```json
+{
+  "video_url": "https://example.com/talk.mp4",
+  "mask_url": "https://example.com/talk_mask.mp4",
+  "style": {"accent": "#ffcf3f"},
+  "pieces": [
+    {"type": "big_text", "start": 0.3, "title": "Takewon", "layer": "behind"},
+    {"type": "doodle", "start": 3.2, "shape": "crown", "layer": "behind"},
+    {"type": "graph", "start": 6, "title": "10X", "items": ["Jan", "Feb", "Mar", "Apr"], "layer": "behind"},
+    {"type": "checklist", "start": 9.4, "title": "Ready to post", "items": ["Cut the pauses", "Add the captions", "Ready to post"]}
+  ],
+  "outlines": [{"start": 3, "duration": 3, "color": "#ffffff"}],
+  "zooms": [{"start": 7.5, "duration": 1.5, "scale": 1.25}]
+}
+```
+
 ## Answer
 
 ```json
-{"file_url": "https://.../<job>_motion.mp4", "pieces": 4, "sounds": 5, "duration": 32.6, "width": 1080, "height": 1920, "seconds": 64.2}
+{"file_url": "https://.../<job>_motion.mp4", "pieces": 4, "behind": 0, "outlines": 0, "zooms": 0, "sounds": 5, "duration": 32.6, "width": 1080, "height": 1920, "seconds": 64.2}
 ```
 
-A request that cannot be done (nothing inside the video, a piece with no words, a file with no picture) answers 400 with a plain message.
+When the toolkit had to cut the speaker out itself, the answer also has `mask_url`.
+
+A request that cannot be done (nothing inside the video, a piece with no words, overlapping punch-ins, a file with no picture) answers 400 with a plain message.
+
+Phone videos filmed on their side are turned the right way up first, so the pieces are drawn for the frame people see.
 
 ## Speed
 

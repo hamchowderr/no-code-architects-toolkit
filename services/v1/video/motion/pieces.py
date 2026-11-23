@@ -28,6 +28,7 @@ piece starts on the sheet, so the same CSS works wherever the piece sits.
 
 import html
 import re
+from urllib.parse import quote
 
 # type -> (default length in seconds, sound it plays by default, shortest, longest)
 PIECES = {
@@ -40,6 +41,25 @@ PIECES = {
     "quote": (4.5, "thud", 2.0, 12.0),
     "transition": (0.7, "whoosh", 0.4, 1.5),
     "logo": (3.0, "ding", 1.0, 3600.0),
+    # Made to sit behind the speaker ("layer": "behind"), though they work in front too.
+    "big_text": (3.0, "impact", 1.0, 3600.0),
+    "graph": (3.5, "riser", 2.0, 10.0),
+    "doodle": (2.5, "pop", 1.0, 3600.0),
+    # Sits in front, at the bottom.
+    "checklist": (4.0, "tick", 2.0, 12.0),
+}
+
+# Pieces that need words in "title".
+NEEDS_TITLE = ("lower_third", "title", "keyword", "stat", "chapter", "follow", "quote", "big_text")
+
+# Hand-drawn doodles: SVG paths on a 100 x 100 box, drawn on and then wobbling.
+DOODLES = {
+    "crown": "M14 72 L20 30 L38 52 L50 22 L62 52 L80 30 L86 72 Z M16 82 L84 82",
+    "star": "M50 10 L61 38 L91 39 L67 58 L76 88 L50 70 L24 88 L33 58 L9 39 L39 38 Z",
+    "heart": "M50 86 C18 62 8 44 18 28 C28 13 44 16 50 32 C56 16 72 13 82 28 C92 44 82 62 50 86 Z",
+    "arrow": "M12 80 C30 52 50 40 80 30 M62 22 L82 29 L72 48",
+    "burst": "M50 8 L50 26 M50 74 L50 92 M8 50 L26 50 M74 50 L92 50 M20 20 L33 33 M67 67 L80 80 M80 20 L67 33 M33 67 L20 80",
+    "circle": "M50 12 C80 10 92 34 88 56 C84 80 58 92 36 86 C14 80 6 56 14 36 C20 22 34 14 56 14",
 }
 
 LOOKS = ("bold", "clean", "editorial", "neon")
@@ -62,6 +82,21 @@ def _counter(title):
     if not match:
         return None
     return match.group(1), int(match.group(2)), match.group(3)
+
+
+TICK = '<path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#121316" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>'
+
+
+def svg_image(body, view="0 0 100 100", fit="xMidYMid meet", cls=""):
+    """An inline SVG drawing as an <img>. HyperFrames only draws inline <svg> in the first
+    piece of a sheet, so drawings are pictures and are revealed with CSS on the <img>."""
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}" preserveAspectRatio="{fit}">{body}</svg>'
+    return f'<img class="{cls}" alt="" src="data:image/svg+xml;utf8,{quote(svg)}">'
+
+
+def big_text_size(words, aspect):
+    """Font size of a big_text piece in --u units: the longer the words, the smaller."""
+    return min(40.0, 135.0 * aspect / max(3, len(words.strip())))
 
 
 def piece_html(index, piece, t0):
@@ -120,6 +155,60 @@ def piece_html(index, piece, t0):
         inner = '<div class="tr a-sweep"></div><div class="tr tr2 a-sweep2"></div>'
     elif kind == "logo":
         inner = f'<div class="lg a-pop"><img src="{esc(piece.get("image"))}" alt=""></div>'
+    elif kind == "big_text":
+        words = (piece.get("title") or "").strip()
+        # Fills the frame's width: the longer the word, the smaller it is drawn.
+        size = big_text_size(words, piece.get("_aspect", 1.0))
+        top = f"top:{float(piece['y']):.1f}%;" if piece.get("y") is not None else ""
+        inner = f'<div class="bt" style="--fs:{size:.2f};{top}">'
+        if sub:
+            inner += f'<div class="bt-kick a-up">{sub}</div>'
+        inner += f'<div class="bt-word a-rise">{title}</div></div>'
+    elif kind == "graph":
+        labels = [esc(x) for x in (piece.get("items") or [])][:6]
+        accent = piece.get("_accent", "#46e5b7")
+        points = []
+        for i in range(7):  # rises slowly, then shoots up
+            x = 6 + i * 88 / 6
+            y = 92 - 84 * (i / 6) ** 2.2
+            points.append(f"{x:.1f},{y:.1f}")
+        line = (
+            f'<polyline points="{" ".join(points)}" fill="none" stroke="{accent}" stroke-width="2.2" '
+            'stroke-linecap="round" stroke-linejoin="round"/>'
+        )
+        inner = '<div class="gr">' + svg_image(line, fit="none", cls="gr-line a-wipe2")
+        if title:
+            inner += f'<div class="gr-tag a-pop2">{title}</div>'
+        if labels:
+            inner += '<div class="gr-labels">' + "".join(
+                f'<span class="a-up" style="animation-delay:{0.15 + i * 0.12:.2f}s,calc(var(--d) - .34s)">{lab}</span>'
+                for i, lab in enumerate(labels)
+            ) + "</div>"
+        inner += "</div>"
+    elif kind == "doodle":
+        shape = piece.get("shape") if piece.get("shape") in DOODLES else "star"
+        x = min(95.0, max(5.0, float(piece.get("x", 50))))
+        y = min(95.0, max(5.0, float(piece.get("y", 12))))
+        path = (
+            f'<path d="{DOODLES[shape]}" fill="none" stroke="{piece.get("_accent", "#46e5b7")}" stroke-width="6" '
+            'stroke-linecap="round" stroke-linejoin="round"/>'
+        )
+        inner = f'<div class="dd" style="left:{x:.1f}%;top:{y:.1f}%"><div class="dd-boil">'
+        inner += svg_image(path, view="-5 -5 110 110", cls="a-scribble") + "</div></div>"
+    elif kind == "checklist":
+        items = [esc(x) for x in (piece.get("items") or [])][:6] or [title]
+        step = min(0.7, max(0.25, (d - 1.2) / max(1, len(items))))
+        inner = '<div class="ck a-card">'
+        if title and piece.get("items"):
+            inner += f'<div class="ck-title">{title}</div>'
+        for i, item in enumerate(items):
+            at = 0.35 + i * step
+            inner += (
+                f'<div class="ck-row" style="--at:{at:.2f}s"><span class="ck-box">'
+                + svg_image(TICK, view="0 0 24 24", cls="ck-mark")
+                + f'</span><span class="ck-text">{item}</span></div>'
+            )
+        inner += "</div>"
     else:  # validated before this point
         raise ValueError(f"Unknown piece type: {kind}")
     return f"<div {clip}>{inner}</div>"
@@ -137,7 +226,7 @@ def sheet_html(pieces, width, height, style, total):
     body = []
     t = 0.0
     for i, piece in enumerate(pieces):
-        body.append(piece_html(i, piece, t))
+        body.append(piece_html(i, dict(piece, _aspect=width / min(width, height), _accent=accent), t))
         t += piece["duration"]
 
     css = CSS.replace("__U__", f"{unit:.3f}px")
@@ -246,6 +335,40 @@ html,body{overflow:hidden;background:transparent}
 /* transition */
 .tr{position:absolute;top:-10%;bottom:-10%;left:-20%;right:-20%;background:var(--accent)}
 .tr2{background:var(--ink);opacity:.9}
+
+/* big text, made to sit behind the speaker */
+.a-scribble{animation:scribble .6s steps(6) calc(var(--t0) + .05s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
+@keyframes scribble{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+.a-wipe2{animation:reveal 1s cubic-bezier(.5,0,.2,1) calc(var(--t0) + .05s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
+@keyframes reveal{from{clip-path:inset(-10% 100% -10% -10%)}to{clip-path:inset(-10% -10% -10% -10%)}}
+.a-pop2{animation:pop .45s cubic-bezier(.2,1.5,.4,1) calc(var(--t0) + .95s) both,fade .3s ease-in calc(var(--t0) + var(--d) - .3s) forwards}
+@keyframes boil{0%{transform:rotate(-3deg) scale(1)}33%{transform:rotate(2deg) scale(1.04)}66%{transform:rotate(-1deg) scale(.98)}100%{transform:rotate(3deg) scale(1.02)}}
+@keyframes tick{from{background:transparent}to{background:var(--accent);border-color:var(--accent)}}
+.bt{position:absolute;left:0;right:0;top:9%;display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*1)}
+.tall .bt{top:11%}
+.bt-kick{font-weight:700;font-size:calc(var(--u)*2.6);letter-spacing:.2em;text-transform:uppercase}
+.bt-word{font-weight:900;font-size:calc(var(--u)*var(--fs));line-height:.9;letter-spacing:-.02em;text-transform:uppercase;white-space:nowrap;color:var(--text);text-shadow:0 calc(var(--u)*.4) calc(var(--u)*2) rgba(0,0,0,.35),var(--glow,0 0 0 transparent)}
+.look-clean .bt-word{color:rgba(255,255,255,.78);-webkit-text-stroke:calc(var(--u)*.15) rgba(255,255,255,.9);text-shadow:0 calc(var(--u)*.6) calc(var(--u)*3) rgba(0,0,0,.25)}
+.look-editorial .bt-word{font-family:"Libre Baskerville",serif;font-weight:700;letter-spacing:-.04em}
+
+/* graph rising behind the speaker */
+.gr{position:absolute;left:var(--side);right:var(--side);top:8%;height:38%}
+.gr-line{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 0 calc(var(--u)*1) var(--accent))}
+.gr-tag{position:absolute;right:0;top:-4%;font-weight:900;font-size:calc(var(--u)*9);line-height:1;color:var(--ink);background:var(--accent);padding:calc(var(--u)*.6) calc(var(--u)*1.6);border-radius:calc(var(--u)*1);transform-origin:100% 0}
+.gr-labels{position:absolute;left:0;right:0;bottom:calc(var(--u)*-5);display:flex;justify-content:space-between;font-weight:700;font-size:calc(var(--u)*2.6);text-transform:uppercase;letter-spacing:.06em}
+
+/* hand-drawn doodle */
+.dd{position:absolute;width:calc(var(--u)*22);height:calc(var(--u)*22);margin:calc(var(--u)*-11) 0 0 calc(var(--u)*-11)}
+.dd-boil{width:100%;height:100%;animation:boil .36s steps(1) calc(var(--t0)) infinite}
+.dd img{width:100%;height:100%;filter:drop-shadow(0 0 calc(var(--u)*.4) rgba(0,0,0,.35))}
+
+/* tick list */
+.ck{position:absolute;left:var(--side);right:var(--side);bottom:var(--lt-bottom);background:rgba(18,19,22,.9);border-radius:calc(var(--u)*2);padding:calc(var(--u)*2.4) calc(var(--u)*2.8);display:flex;flex-direction:column;gap:calc(var(--u)*1.6)}
+.ck-title{font-weight:800;font-size:calc(var(--u)*3);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.ck-row{display:flex;align-items:center;gap:calc(var(--u)*1.8);animation:up .4s cubic-bezier(.2,.8,.2,1) calc(var(--t0) + var(--at) - .25s) both}
+.ck-box{flex:none;width:calc(var(--u)*4.6);height:calc(var(--u)*4.6);border-radius:calc(var(--u)*1);border:calc(var(--u)*.4) solid rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;animation:tick .2s ease-out calc(var(--t0) + var(--at)) both}
+.ck-mark{width:80%;height:80%;animation:scribble .25s ease-out calc(var(--t0) + var(--at)) both}
+.ck-text{font-weight:700;font-size:calc(var(--u)*4);line-height:1.1}
 
 /* logo */
 .lg{position:absolute;right:var(--side);top:5%;width:calc(var(--u)*14);height:calc(var(--u)*14);display:flex;align-items:center;justify-content:center;transform-origin:100% 0}

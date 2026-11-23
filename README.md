@@ -143,7 +143,13 @@ Each endpoint is supported by robust payload validation and detailed API documen
   - Turns a wide video into a tall (or square) one that follows whoever is talking.
 
 - **[`/v1/video/motion`](docs/video/motion.md)**
-  - Lays motion graphics (lower thirds, titles, stat cards, follow cards and more) and sound effects over a video.
+  - Lays motion graphics (lower thirds, titles, stat cards, follow cards, tick lists, graphs, doodles and more) and sound effects over a video, in front of or behind the speaker, with sticker outlines and punch-ins.
+
+- **[`/v1/video/cutout`](docs/video/cutout.md)**
+  - Cuts the speaker out of a video with no green screen and hands back their mask, kept for every effect that needs it.
+
+- **[`/v1/video/background`](docs/video/background.md)**
+  - Puts a new background (blur, colour, picture or video) behind the speaker.
 
 ---
 
