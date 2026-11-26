@@ -45,6 +45,9 @@ Each endpoint is supported by robust payload validation and detailed API documen
 - **[`/v1/audio/beats`](docs/audio/beats.md)**
   - Finds a song's tempo, every beat and where bars start, with plain signal processing (no AI), so an edit can cut on the beat.
 
+- **[`/v1/audio/align`](docs/audio/align.md)**
+  - Finds where a separate mic recording sits against the camera's own sound (offset and clock drift), with plain signal processing (no AI), so the two can be swapped in sync.
+
 ### Code
 
 - **[`/v1/code/execute/python`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/code/execute/execute_python.md)**
